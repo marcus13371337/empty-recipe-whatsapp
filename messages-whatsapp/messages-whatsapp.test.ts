@@ -1,4 +1,6 @@
-import { expect, test } from "@empty/module-sdk/testing";
+import { existsSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+import { expect, failureFrom, test } from "@empty/module-sdk/testing";
 import { ANNA, BO, ME, setUp } from "./fakeHelper.test-harness";
 import { UNSUPPORTED } from "./whatsapp";
 
@@ -201,4 +203,161 @@ test("a message WhatsApp can't carry says to open it in WhatsApp", async () => {
   await engine.job("messages-whatsapp/sync");
 
   expect((await chat("c1")).messages.map(({ text }) => text)).toEqual([UNSUPPORTED]);
+});
+
+test("people carry their phone number where WhatsApp gives one, else their WhatsApp id, and come into people unlinked", async () => {
+  const { engine, fake, chat } = await setUp();
+  fake.chat("g1", [ANNA, BO], { group: true, name: "Family" });
+  fake.history("g1", BO, "Hi all", 5);
+
+  await engine.job("messages-whatsapp/sync");
+
+  const family = await chat("g1");
+  expect(family.conversation?.participants).toMatchObject([
+    { handle: ANNA.phone, kind: "phone", source_name: "Anna" },
+    { handle: BO.id, kind: "id", source_name: "Bo" },
+  ]);
+  expect(family.messages[0]).toMatchObject({ from_handle: BO.id, from_kind: "id" });
+  const handles = await engine.collection("people/handles").query({});
+  expect(handles.map(({ kind, service, value, someone }) => ({ kind, service, value, someone }))).toEqual(
+    expect.arrayContaining([
+      { kind: "phone", service: null, value: ANNA.phone, someone: null },
+      { kind: "id", service: "WhatsApp", value: BO.id, someone: null },
+    ]),
+  );
+});
+
+test("a reply with a picture goes out through the helper, which gets the file in its folder", async () => {
+  const { engine, fake, chat } = await setUp();
+  fake.chat("c1", [ANNA]);
+  fake.history("c1", ANNA, "Photo?", 5);
+  await engine.job("messages-whatsapp/sync");
+  const { conversation } = await chat("c1");
+
+  await engine.run("messages/send", {
+    conversation: conversation?.id ?? "",
+    text: "Here",
+    files: [{ name: "beach.png", base64: Buffer.from("a picture").toString("base64") }],
+  });
+  await engine.job("messages-whatsapp/send");
+
+  const sent = fake.asked.find(({ method }) => method === "send");
+  expect(sent?.params).toMatchObject({ conversation_id: "c1", text: "Here" });
+  expect(JSON.stringify(sent?.params.files)).toContain(join(fake.folder, "outgoing"));
+  expect(readdirSync(join(fake.folder, "outgoing"))).toEqual([]);
+  const messages = (await chat("c1")).messages;
+  expect(messages.at(-1)).toMatchObject({ text: "Here", from_me: true, pending: null });
+  expect(messages.at(-1)?.attachments[0]?.id).toBe("ref-0");
+});
+
+test("a reply is kept from the helper's answer, before its echo arrives", async () => {
+  const { engine, fake, chat } = await setUp();
+  fake.chat("c1", [ANNA]);
+  fake.arrives("c1", ANNA, "Hi");
+  await engine.job("messages-whatsapp/sync");
+  fake.noEchoes();
+  const { conversation } = await chat("c1");
+
+  await engine.run("messages/send", { conversation: conversation?.id ?? "", text: "Hello" });
+  await engine.job("messages-whatsapp/send");
+
+  expect((await chat("c1")).messages.map(({ text, pending }) => ({ text, pending }))).toEqual([
+    { text: "Hi", pending: null },
+    { text: "Hello", pending: null },
+  ]);
+});
+
+test("a reply the person said no to is kept as refused by them", async () => {
+  const { engine, fake, chat } = await setUp();
+  fake.chat("c1", [ANNA]);
+  await engine.job("messages-whatsapp/sync");
+  const { conversation } = await chat("c1");
+  engine.refuse("whatsapp", "send", failureFrom("You said no.", "refused_by_person"));
+
+  await engine.run("messages/send", { conversation: conversation?.id ?? "", text: "Here" });
+  await engine.job("messages-whatsapp/send");
+
+  const reply = (await chat("c1")).messages.find(({ text }) => text === "Here");
+  expect(reply?.failed_because).toBe("refused_by_person");
+});
+
+test("an attachment is fetched from the helper, and its file in the helper's folder is removed", async () => {
+  const { engine, fake, chat } = await setUp();
+  fake.chat("c1", [ANNA]);
+  fake.history("c1", ANNA, "", 5, {
+    attachments: [{ id: "a1", kind: "image", type: "image/png", name: "cat.png", ref: "r1" }],
+  });
+  await engine.job("messages-whatsapp/sync");
+  const [message] = (await chat("c1")).messages;
+
+  const answer = await engine.run("messages-whatsapp/attachment", {
+    account: "whatsapp",
+    id: message?.attachments[0]?.id ?? "",
+  });
+
+  expect(answer).toMatchObject({
+    kept: "here",
+    file: { base64: Buffer.from("a picture").toString("base64"), mediaType: "image/png" },
+  });
+  expect(existsSync(join(fake.folder, "r1.png"))).toBe(false);
+});
+
+test("a WhatsApp file can't be opened on the Mac, and says to open the chat in WhatsApp", async () => {
+  const { engine } = await setUp();
+
+  await expect(
+    engine.run("messages-whatsapp/openAttachment", { account: "whatsapp", id: "r1" }),
+  ).rejects.toThrow("open the chat there");
+});
+
+test("earlier messages are none, since WhatsApp keeps no history, and the helper is never asked for any", async () => {
+  const { engine, fake } = await setUp();
+  fake.chat("c1", [ANNA]);
+  fake.history("c1", ANNA, "First", 60);
+  await engine.job("messages-whatsapp/sync");
+
+  const answer = await engine.run("messages-whatsapp/older", {
+    account: "whatsapp",
+    conversation: "c1",
+    before: new Date().toISOString(),
+    limit: 10,
+  });
+
+  expect(answer).toEqual({ messages: [] });
+  expect(fake.asked.filter(({ method }) => method === "messages")).toEqual([]);
+});
+
+test("a failed sync keeps the reason's code beside its words", async () => {
+  const { engine, fake } = await setUp();
+  fake.chat("c1", [ANNA]);
+  engine.refuse("whatsapp", "conversations", failureFrom("Link again.", "needs_login"));
+
+  await expect(engine.job("messages-whatsapp/sync")).rejects.toThrow();
+
+  const [account] = await engine.collection("messages/accounts").query({});
+  expect(account?.failed_because).toBe("needs_login");
+});
+
+test("a sync that only timed out leaves the account without a problem", async () => {
+  const { engine, fake } = await setUp();
+  fake.chat("c1", [ANNA]);
+  await engine.job("messages-whatsapp/sync");
+  engine.refuse("whatsapp", "conversations", failureFrom("Too slow.", "timeout"));
+
+  await expect(engine.job("messages-whatsapp/sync")).rejects.toThrow();
+
+  const [account] = await engine.collection("messages/accounts").query({});
+  expect(account?.problem).toBeNull();
+});
+
+test("a sync with the WhatsApp connection gone marks the account gone", async () => {
+  const { engine, fake } = await setUp();
+  fake.chat("c1", [ANNA]);
+  await engine.job("messages-whatsapp/sync");
+
+  engine.disconnect("whatsapp");
+  await engine.job("messages-whatsapp/sync");
+
+  const [account] = await engine.collection("messages/accounts").query({});
+  expect(account?.gone_at).not.toBeNull();
 });
