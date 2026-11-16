@@ -60,6 +60,8 @@ export function whatsappConnection(): CodeConnection {
     const batch = waiting.slice(0, limit);
     const of = (kind: Heard) => batch.filter((entry) => entry.kind === kind).map(({ raw }) => raw);
     const conversations = of("conversation").flatMap((raw) => heardChat(raw) ?? []);
+    const reactions = of("reaction").flatMap((raw) => people.reactionChangeOf(raw) ?? []);
+    const reads = of("read").flatMap((raw) => people.readChangeOf(raw) ?? []);
     const messages: Message[] = of("message").flatMap((raw) => people.messageOf(raw) ?? []);
     const theirChats = [...new Set(messages.map(({ conversation }) => conversation))].map(
       (id) => chats.get(id) ?? { id, service: SERVICE },
@@ -69,8 +71,8 @@ export function whatsappConnection(): CodeConnection {
       more: waiting.length > batch.length,
       conversations: [...conversations, ...theirChats],
       messages,
-      reactions: of("reaction").flatMap((raw) => people.reactionChangeOf(raw) ?? []),
-      reads: of("read").flatMap((raw) => people.readChangeOf(raw) ?? []),
+      reactions,
+      reads,
     };
   };
 

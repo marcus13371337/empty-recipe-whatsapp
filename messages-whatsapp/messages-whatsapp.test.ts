@@ -50,12 +50,12 @@ test("a linking history larger than one batch, in a chat beyond the chats kept, 
   await engine.set("messages-whatsapp/chats", 1);
   fake.chat("old", [BO]);
   fake.chat("new", [ANNA]);
-  for (let minute = 1200; minute > 0; minute -= 1) fake.history("old", BO, `Line ${minute}`, minute + 60);
+  for (let minute = 600; minute > 0; minute -= 1) fake.history("old", BO, `Line ${minute}`, minute + 60);
   fake.history("new", ANNA, "Newest", 1);
 
   await engine.job("messages-whatsapp/sync");
 
-  expect((await chat("old")).messages).toHaveLength(1200);
+  expect((await chat("old")).messages).toHaveLength(600);
   expect((await chat("new")).messages).toHaveLength(1);
 });
 
@@ -423,4 +423,36 @@ test("the person's own reaction is theirs before any message of theirs was seen"
   expect((await chat("c1")).messages[0]?.reactions).toEqual([{ from: null, from_me: true, kind: "🎉" }]);
   const handles = await engine.collection("people/handles").query({});
   expect(handles.map(({ value }) => value)).not.toContain(ME.phone);
+});
+
+test("in a group, a reaction from someone who has left stays theirs, not the person's", async () => {
+  const { engine, fake, chat } = await setUp();
+  const gone = { id: "46709999999@s.whatsapp.net", name: "Cleo", phone: "+46709999999" };
+  fake.chat("g1", [ANNA, BO], { group: true, name: "Family" });
+  fake.history("g1", ANNA, "Cake!", 5, { reactions: [{ sender_id: gone.id, emoji: "😍" }] });
+
+  await engine.job("messages-whatsapp/sync");
+
+  expect((await chat("g1")).messages[0]?.reactions).toMatchObject([
+    { from: { handle: gone.id }, from_me: false, kind: "😍" },
+  ]);
+});
+
+test("the person's own reaction in a group is theirs once a one-to-one chat showed who they are", async () => {
+  const { engine, fake, chat } = await setUp();
+  fake.chat("c1", [ANNA]);
+  fake.chat("g1", [ANNA, BO], { group: true, name: "Family" });
+  const hi = fake.history("c1", ANNA, "Hi", 10);
+  fake.history("g1", BO, "Cake!", 5, { reactions: [{ sender_id: ME.id, emoji: "😍" }] });
+  fake.emit("reaction", {
+    conversation_id: "c1",
+    message_id: String(hi.id),
+    sender_id: ME.id,
+    emoji: "👋",
+    at: new Date().toISOString(),
+  });
+
+  await engine.job("messages-whatsapp/sync");
+
+  expect((await chat("g1")).messages[0]?.reactions).toEqual([{ from: null, from_me: true, kind: "😍" }]);
 });

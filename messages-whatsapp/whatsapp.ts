@@ -55,7 +55,7 @@ function attachmentOf(raw: JsonValue, message: string): Attachment | null {
 export class People {
   private names = new Map<string, string>();
   private phones = new Map<string, string>();
-  private others = new Map<string, Set<string>>();
+  private other = new Map<string, string>();
   private me: string | null = null;
 
   private learn(raw: JsonValue): Person | null {
@@ -76,8 +76,11 @@ export class People {
   }
 
   private isMe(conversation: string, id: string) {
-    const others = this.others.get(conversation);
-    return id === this.me || (others !== undefined && !others.has(id));
+    if (id === this.me) return true;
+    const other = this.other.get(conversation);
+    if (other === undefined || other === id) return false;
+    this.me = id;
+    return true;
   }
 
   private reactionOf(conversation: string, from: string, kind: string): Reaction {
@@ -96,7 +99,8 @@ export class People {
     const id = textOf(raw.id);
     if (id === null) return null;
     const people = listOf(raw.participants);
-    this.others.set(id, new Set(people.flatMap((value) => textOf(objectOf(value).id) ?? [])));
+    const other = people.length === 1 ? textOf(objectOf(people[0]).id) : null;
+    if (raw.kind === "direct" && other !== null) this.other.set(id, other);
     const participants = people.flatMap((value) => this.learn(value) ?? []);
     return {
       id,
