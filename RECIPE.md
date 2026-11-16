@@ -60,6 +60,7 @@ Not there: starting a new chat, edits, deleted messages, polls, view-once, calls
 - Pictures show in the chat. Other files can't be opened on the Mac from here: the person opens them in WhatsApp on the phone. WhatsApp deletes media from its servers after a while; after that, the phone may still have it.
 - A chat opens in WhatsApp (at wa.me) only when it is with one person whose number is known. Groups open on the phone.
 - Being read is shown only in one-to-one chats.
+- The person's own reactions in groups are marked as theirs once the app has seen one of their messages, or a reaction of theirs in a one-to-one chat.
 
 ## When the link ends
 
