@@ -1,5 +1,6 @@
 import { expect, test } from "@empty/module-sdk/testing";
 import { ANNA, BO, ME, setUp } from "./fakeHelper.test-harness";
+import { UNSUPPORTED } from "./whatsapp";
 
 test("the history the phone sends at linking is kept, chats named as in WhatsApp", async () => {
   const { engine, fake, chat } = await setUp();
@@ -89,3 +90,115 @@ for (const [code, words] of [
     expect(account?.problem).toBe(words);
   });
 }
+
+test("a live message wakes a sync, which keeps it once", async () => {
+  const { engine, fake, chat, changes } = await setUp();
+  fake.chat("c1", [ANNA]);
+  await engine.job("messages-whatsapp/sync");
+
+  fake.arrives("c1", ANNA, "Are you there?");
+  expect(changes()).toBe(1);
+  await engine.job("messages-whatsapp/sync");
+  await engine.job("messages-whatsapp/sync");
+
+  expect((await chat("c1")).messages.map(({ text }) => text)).toEqual(["Are you there?"]);
+  expect((await chat("c1")).conversation).toMatchObject({ last_text: "Are you there?" });
+});
+
+test("a reaction and a read receipt change a message already kept", async () => {
+  const { engine, fake, chat } = await setUp();
+  fake.chat("c1", [ANNA]);
+  await engine.job("messages-whatsapp/sync");
+  const mine = fake.arrives("c1", ME, "See you at eight");
+  await engine.job("messages-whatsapp/sync");
+
+  fake.emit("reaction", {
+    conversation_id: "c1",
+    message_id: String(mine.id),
+    sender_id: ANNA.id,
+    emoji: "❤️",
+    at: new Date().toISOString(),
+  });
+  fake.emit("read", { conversation_id: "c1", reader_id: ANNA.id, read_at: new Date().toISOString() });
+  await engine.job("messages-whatsapp/sync");
+
+  const [kept] = (await chat("c1")).messages;
+  expect(kept?.reactions).toMatchObject([
+    { from: { handle: ANNA.phone, kind: "phone" }, from_me: false, kind: "❤️" },
+  ]);
+  expect(kept?.read).not.toBeNull();
+});
+
+test("a reaction taken back leaves the message without it", async () => {
+  const { engine, fake, chat } = await setUp();
+  fake.chat("c1", [ANNA]);
+  const said = fake.arrives("c1", ANNA, "Cake!");
+  await engine.job("messages-whatsapp/sync");
+  const react = (emoji: string) =>
+    fake.emit("reaction", {
+      conversation_id: "c1",
+      message_id: String(said.id),
+      sender_id: ANNA.id,
+      emoji,
+      at: new Date().toISOString(),
+    });
+
+  react("😍");
+  react("👍");
+  await engine.job("messages-whatsapp/sync");
+  expect((await chat("c1")).messages[0]?.reactions.map(({ kind }) => kind)).toEqual(["👍"]);
+
+  react("");
+  await engine.job("messages-whatsapp/sync");
+  expect((await chat("c1")).messages[0]?.reactions).toEqual([]);
+});
+
+test("reading on the person's own other device marks none of their messages read", async () => {
+  const { engine, fake, chat } = await setUp();
+  fake.chat("c1", [ANNA]);
+  await engine.job("messages-whatsapp/sync");
+  fake.arrives("c1", ME, "See you at eight");
+  await engine.job("messages-whatsapp/sync");
+
+  fake.emit("read", { conversation_id: "c1", reader_id: ME.id, read_at: new Date().toISOString() });
+  await engine.job("messages-whatsapp/sync");
+
+  expect((await chat("c1")).messages[0]?.read).toBeNull();
+});
+
+test("a read receipt stays when a later sync brings the chat again", async () => {
+  const { engine, fake, chat } = await setUp();
+  fake.chat("c1", [ANNA]);
+  fake.history("c1", ME, "See you at eight", 2);
+  await engine.job("messages-whatsapp/sync");
+
+  fake.emit("read", { conversation_id: "c1", reader_id: ANNA.id, read_at: new Date().toISOString() });
+  await engine.job("messages-whatsapp/sync");
+  fake.arrives("c1", ANNA, "Great");
+  await engine.job("messages-whatsapp/sync");
+
+  const [mine] = (await chat("c1")).messages;
+  expect(mine?.read).not.toBeNull();
+});
+
+test("the person's own reaction in the linking history is theirs", async () => {
+  const { engine, fake, chat } = await setUp();
+  fake.chat("c1", [ANNA]);
+  fake.history("c1", ME, "On my way", 5);
+  fake.history("c1", ANNA, "Cake!", 4, { reactions: [{ sender_id: ME.id, emoji: "😍" }] });
+
+  await engine.job("messages-whatsapp/sync");
+
+  const cake = (await chat("c1")).messages.find(({ text }) => text === "Cake!");
+  expect(cake?.reactions).toEqual([{ from: null, from_me: true, kind: "😍" }]);
+});
+
+test("a message WhatsApp can't carry says to open it in WhatsApp", async () => {
+  const { engine, fake, chat } = await setUp();
+  fake.chat("c1", [ANNA]);
+  fake.history("c1", ANNA, "", 5, { unsupported: true });
+
+  await engine.job("messages-whatsapp/sync");
+
+  expect((await chat("c1")).messages.map(({ text }) => text)).toEqual([UNSUPPORTED]);
+});
