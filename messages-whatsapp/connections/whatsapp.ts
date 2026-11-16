@@ -4,109 +4,49 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import type { CodeConnection, HelperProgram, JsonObject, JsonValue } from "@empty/module-sdk";
 import { listOf, numberOf, objectOf, textOf } from "../json";
-import {
-  type Conversation,
-  conversationOf,
-  HELPER,
-  type Message,
-  messageOf,
-  NO_REF,
-  People,
-  reactionOf,
-  SERVICE,
-} from "../whatsapp";
+import { type Conversation, HELPER, type Message, NO_REF, People, SERVICE } from "../whatsapp";
 
 const HELPER_PAGE = 100;
-const KNOWN = 5_000;
 
-type Waiting = { seq: number; kind: "messages" | "changed" | "conversations"; value: JsonValue };
+type Heard = "message" | "reaction" | "read" | "conversation";
+type Waiting = { seq: number; kind: Heard; raw: JsonValue };
 
 const STRING = { type: "string", minLength: 1 };
 
 export function whatsappConnection(): CodeConnection {
   const people = new People();
   const chats = new Map<string, Conversation>();
-  const others = new Map<string, Set<string>>();
-  const known = new Map<string, Message>();
   let waiting: Waiting[] = [];
   let seq = 0;
   let state: { state: string; message: string | null } | null = null;
 
-  const remember = (given: Message) => {
-    const read = given.read ?? known.get(given.id)?.read;
-    const message = read ? { ...given, read } : given;
-    known.delete(message.id);
-    known.set(message.id, message);
-    if (known.size > KNOWN) {
-      const oldest = known.keys().next().value;
-      if (oldest !== undefined) known.delete(oldest);
-    }
-    return message;
-  };
-  const wait = (kind: Waiting["kind"], value: Message | Conversation) => {
+  const wait = (kind: Heard, raw: JsonValue) => {
     seq += 1;
-    waiting.push({ seq, kind, value: JSON.parse(JSON.stringify(value)) });
+    waiting.push({ seq, kind, raw });
   };
   const heardChat = (raw: JsonValue) => {
-    const found = conversationOf(raw, people);
-    if (found === null) return null;
-    chats.set(found.id, found);
-    const ids = listOf(objectOf(raw).participants).flatMap((p) => textOf(objectOf(p).id) ?? []);
-    others.set(found.id, new Set(ids));
+    const found = people.conversationOf(raw);
+    if (found !== null) chats.set(found.id, found);
     return found;
   };
 
-  const heard: Record<string, (data: JsonValue) => boolean> = {
+  const heard: Record<Heard | "state", (data: JsonValue) => boolean> = {
     message: (data) => {
-      const message = messageOf(data, people);
-      if (message === null) return false;
-      remember(message);
-      wait("messages", message);
+      people.learnMe(data);
+      wait("message", data);
       return true;
     },
     reaction: (data) => {
-      const { message_id, sender_id, emoji } = objectOf(data);
-      const message = known.get(textOf(message_id) ?? "");
-      const from = textOf(sender_id);
-      if (!message || from === null) return false;
-      const reacting = reactionOf(from, "", people);
-      const kept = message.reactions.filter(
-        (reaction) =>
-          reaction.from_me !== reacting.from_me ||
-          (!reacting.from_me && reaction.from?.handle !== reacting.from?.handle),
-      );
-      const kind = textOf(emoji);
-      const changed = { ...message, reactions: kind ? [...kept, { ...reacting, kind }] : kept };
-      remember(changed);
-      wait("changed", changed);
+      wait("reaction", data);
       return true;
     },
     read: (data) => {
-      const { conversation_id, reader_id, read_at } = objectOf(data);
-      const conversation = textOf(conversation_id);
-      const at = textOf(read_at);
-      if (conversation === null || at === null || chats.get(conversation)?.group !== false) {
-        return false;
-      }
-      if (!others.get(conversation)?.has(textOf(reader_id) ?? "")) return false;
-      const reached = [...known.values()].filter(
-        (message) =>
-          message.conversation === conversation &&
-          message.from_me &&
-          !message.read &&
-          Date.parse(message.sent) <= Date.parse(at),
-      );
-      for (const message of reached) {
-        const changed = { ...message, read: at };
-        remember(changed);
-        wait("changed", changed);
-      }
-      return reached.length > 0;
+      wait("read", data);
+      return true;
     },
     conversation: (data) => {
-      const found = heardChat(data);
-      if (found === null) return false;
-      wait("conversations", found);
+      if (heardChat(data) === null) return false;
+      wait("conversation", data);
       return true;
     },
     state: (data) => {
@@ -118,18 +58,19 @@ export function whatsappConnection(): CodeConnection {
 
   const take = (limit: number) => {
     const batch = waiting.slice(0, limit);
-    const of = (kind: Waiting["kind"]) =>
-      batch.filter((entry) => entry.kind === kind).map(({ value }) => value);
-    const messages = of("messages");
-    const theirChats = [
-      ...new Set(messages.map((message) => textOf(objectOf(message).conversation) ?? "")),
-    ].map((id) => chats.get(id) ?? { id, service: SERVICE });
+    const of = (kind: Heard) => batch.filter((entry) => entry.kind === kind).map(({ raw }) => raw);
+    const conversations = of("conversation").flatMap((raw) => heardChat(raw) ?? []);
+    const messages: Message[] = of("message").flatMap((raw) => people.messageOf(raw) ?? []);
+    const theirChats = [...new Set(messages.map(({ conversation }) => conversation))].map(
+      (id) => chats.get(id) ?? { id, service: SERVICE },
+    );
     return {
       upTo: batch.at(-1)?.seq ?? seq,
       more: waiting.length > batch.length,
+      conversations: [...conversations, ...theirChats],
       messages,
-      changed: of("changed"),
-      conversations: [...of("conversations"), ...JSON.parse(JSON.stringify(theirChats))],
+      reactions: of("reaction").flatMap((raw) => people.reactionChangeOf(raw) ?? []),
+      reads: of("read").flatMap((raw) => people.readChangeOf(raw) ?? []),
     };
   };
 
@@ -170,20 +111,13 @@ export function whatsappConnection(): CodeConnection {
           ...(files.length > 0 && { files }),
         }),
       );
-      const answered = listOf(answer.messages);
-      const echoed = answered.flatMap((raw) => known.get(textOf(objectOf(raw).id) ?? "") ?? []);
-      const fresh = answered
-        .filter((raw) => !known.has(textOf(objectOf(raw).id) ?? ""))
-        .flatMap((raw) => {
-          const message = messageOf(raw, people);
-          return message ? [remember(message)] : [];
-        });
-      for (const message of fresh) wait("messages", message);
+      const messages = listOf(answer.messages);
+      for (const raw of messages) wait("message", raw);
       const problem = objectOf(answer.problem);
       if (textOf(problem.message)) {
         throw new Error(`Only part of it went out: ${textOf(problem.message)}`);
       }
-      return { messages: [...echoed, ...fresh] };
+      return { messages: messages.flatMap((raw) => people.messageOf(raw) ?? []) };
     } finally {
       await Promise.all(files.map(({ path }) => rm(path, { force: true })));
     }
@@ -231,7 +165,7 @@ export function whatsappConnection(): CodeConnection {
       },
       take_events: {
         description:
-          "Up to limit of what arrived since the last drop_events: messages, changes and chats, with the chat of every message",
+          "Up to limit of what arrived since the last drop_events: chats, messages with the chat of each, reactions and reads",
         does: "read",
         input: {
           type: "object",

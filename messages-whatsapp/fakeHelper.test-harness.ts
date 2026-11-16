@@ -176,10 +176,10 @@ export function fakeHelper() {
 
 export async function setUp() {
   const fake = fakeHelper();
-  const connection = whatsappConnection();
+  let connection = whatsappConnection();
   const mac = { control: async () => "" };
   const context = { mac, helperProgram: () => fake.helper };
-  const stop = new AbortController();
+  let stop = new AbortController();
   let changes = 0;
   await connection.watch?.(() => (changes += 1), { ...context, signal: stop.signal });
   const engine = testEngine({
@@ -201,5 +201,11 @@ export async function setUp() {
     });
     return { conversation, messages };
   };
-  return { engine, fake, chat, changes: () => changes, stop: () => stop.abort() };
+  const restart = async () => {
+    stop.abort();
+    stop = new AbortController();
+    connection = whatsappConnection();
+    await connection.watch?.(() => (changes += 1), { ...context, signal: stop.signal });
+  };
+  return { engine, fake, chat, changes: () => changes, restart };
 }

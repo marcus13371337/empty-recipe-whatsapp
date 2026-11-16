@@ -59,7 +59,7 @@ Not there: starting a new chat, edits, deleted messages, polls, view-once, calls
 - History and messages reach the app only as they arrive. The connection holds them until the next sync keeps them, which is at once. If the app quits or the connection restarts in between, those few are lost; the history from linking would then be gone for good.
 - Pictures show in the chat. Other files can't be opened on the Mac from here: the person opens them in WhatsApp on the phone. WhatsApp deletes media from its servers after a while; after that, the phone may still have it.
 - A chat opens in WhatsApp (at wa.me) only when it is with one person whose number is known. Groups open on the phone.
-- Being read is shown only in one-to-one chats, and only on messages the connection has seen since it last started.
+- Being read is shown only in one-to-one chats.
 
 ## When the link ends
 

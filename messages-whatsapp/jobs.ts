@@ -6,8 +6,14 @@ import {
   type Conversation,
   keptConversation,
   keptMessage,
+  keptReactionChange,
+  keptReactions,
+  keptReadChange,
   type Message,
   type Person,
+  type Reaction,
+  type ReactionChange,
+  type ReadChange,
   SERVICE,
 } from "./whatsapp";
 
@@ -22,7 +28,7 @@ function unique<T extends { id: string }>(values: T[]): T[] {
   return [...new Map(values.map((value) => [value.id, value])).values()];
 }
 
-const messagesIn = (value: JsonValue | undefined) =>
+const messagesIn = (value: JsonValue | undefined): Message[] =>
   listOf(value).flatMap((entry) => keptMessage(entry) ?? []);
 
 const conversationsIn = (value: JsonValue | undefined) =>
@@ -48,12 +54,22 @@ async function lastLines(context: JobContext, account: string | undefined) {
   return last;
 }
 
-const peopleIn = (conversations: Conversation[], messages: Message[]): Person[] => [
+type Changed = {
+  id: string;
+  conversation: string;
+  from_me: boolean;
+  sent: string;
+  reactions: Reaction[];
+  read: string | null;
+};
+
+const peopleIn = (conversations: Conversation[], messages: Message[], reactions: ReactionChange[]) => [
   ...conversations.flatMap(({ participants }) => participants ?? []),
   ...messages.flatMap(({ from, reactions }) => [
     ...(from ? [from] : []),
     ...reactions.flatMap((reaction) => reaction.from ?? []),
   ]),
+  ...reactions.flatMap(({ from }) => from ?? []),
 ];
 
 function distinct(people: Person[]): Person[] {
@@ -63,6 +79,69 @@ function distinct(people: Person[]): Person[] {
     if (!kept?.name) byHandle.set(person.handle, person);
   }
   return [...byHandle.values()];
+}
+
+const sameSender = (a: Reaction, b: { from: Person | null; from_me: boolean }) =>
+  a.from_me === b.from_me && (a.from_me || a.from?.handle === b.from?.handle);
+
+async function changesFrom(
+  context: JobContext,
+  account: string,
+  reactions: ReactionChange[],
+  reads: ReadChange[],
+) {
+  const changed = new Map<string, Changed>();
+  const kept = async (source_id: string, conversation: string) => {
+    const already = changed.get(source_id);
+    if (already) return already;
+    const [row] = await context
+      .collection("messages/messages")
+      .query({ where: { account, source_id } });
+    if (!row?.source_id) return null;
+    return {
+      id: row.source_id,
+      conversation,
+      from_me: row.from_me ?? false,
+      sent: row.sent ?? "",
+      reactions: keptReactions(
+        listOf(row.reactions).map((entry) => {
+          const { from, from_me, kind } = objectOf(entry);
+          const person = objectOf(from);
+          return {
+            from: textOf(person.handle) === null ? null : { ...person, name: person.source_name ?? null },
+            from_me: from_me ?? false,
+            kind: kind ?? null,
+          };
+        }),
+      ),
+      read: row.read ?? null,
+    };
+  };
+  for (const reaction of reactions) {
+    const message = await kept(reaction.message, reaction.conversation);
+    if (!message) continue;
+    const others = message.reactions.filter((given) => !sameSender(given, reaction));
+    const { from, from_me, kind } = reaction;
+    changed.set(message.id, {
+      ...message,
+      reactions: kind ? [...others, { from, from_me, kind }] : others,
+    });
+  }
+  for (const { conversation, reader, at } of reads) {
+    const [chat] = await context
+      .collection("messages/conversations")
+      .query({ where: { account, source_id: conversation } });
+    const handles = listOf(chat?.participants).map((entry) => textOf(objectOf(entry).handle));
+    if (!chat || chat.group || !handles.includes(reader.handle)) continue;
+    const unread = await context.collection("messages/messages").query({
+      where: { conversation: chat.id, from_me: true, read: null, sent: { lte: at } },
+    });
+    for (const row of unread) {
+      const message = await kept(row.source_id ?? "", conversation);
+      if (message) changed.set(message.id, { ...message, read: at });
+    }
+  }
+  return [...changed.values()];
 }
 
 async function addHandles(context: JobContext, people: Person[]) {
@@ -102,22 +181,30 @@ export async function syncAccount(context: JobContext, now = new Date()) {
       for (const message of [...messages].sort((a, b) => Date.parse(a.sent) - Date.parse(b.sent))) {
         newest.set(message.conversation, message);
       }
-      const conversations = unique([...listed, ...conversationsIn(waiting.conversations)]).map(
-        (conversation) => {
-          const last = newest.get(conversation.id);
-          return last ? { ...conversation, last_message: last } : conversation;
-        },
-      );
-      const changed = messagesIn(waiting.changed);
-      synced = await context.action("messages/sync", {
-        source,
-        account: ACCOUNT,
-        since: since.toISOString(),
-        conversations,
-        messages,
-        changed,
+      const taken = conversationsIn(waiting.conversations);
+      const conversations = unique([...listed, ...taken]).map((conversation) => {
+        const last = newest.get(conversation.id);
+        return last ? { ...conversation, last_message: last } : conversation;
       });
-      met.push(...peopleIn(conversations, [...messages, ...changed]));
+      const keep = (more: { messages: Message[]; changed: Changed[] }) =>
+        context.action("messages/sync", {
+          source,
+          account: ACCOUNT,
+          since: since.toISOString(),
+          conversations,
+          ...more,
+        });
+      synced = await keep({ messages, changed: [] });
+      const reactions = listOf(waiting.reactions).flatMap((entry) => keptReactionChange(entry) ?? []);
+      const reads = listOf(waiting.reads).flatMap((entry) => keptReadChange(entry) ?? []);
+      if (reactions.length > 0 || reads.length > 0) {
+        const [account] = await context
+          .collection("messages/accounts")
+          .query({ where: { source, source_id: ACCOUNT.id } });
+        const changed = await changesFrom(context, account?.id ?? "", reactions, reads);
+        if (changed.length > 0) synced = await keep({ messages: [], changed });
+      }
+      met.push(...peopleIn(taken, messages, reactions));
       await context.connectors.call(CONNECTION, "drop_events", {
         upTo: numberOf(waiting.upTo) ?? 0,
       });

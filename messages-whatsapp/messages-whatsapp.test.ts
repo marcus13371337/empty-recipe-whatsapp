@@ -382,3 +382,45 @@ test("a chat with one person opens in WhatsApp at wa.me with their number, and a
     openConversation(context, { account: "whatsapp", conversation: "g1" }),
   ).rejects.toThrow("open it in WhatsApp on the phone");
 });
+
+test("a reaction and a read receipt reach a message kept before the connection restarted", async () => {
+  const { engine, fake, chat, restart } = await setUp();
+  fake.chat("c1", [ANNA]);
+  const mine = fake.history("c1", ME, "See you at eight", 5);
+  await engine.job("messages-whatsapp/sync");
+  await restart();
+
+  fake.emit("reaction", {
+    conversation_id: "c1",
+    message_id: String(mine.id),
+    sender_id: ANNA.id,
+    emoji: "👍",
+    at: new Date().toISOString(),
+  });
+  fake.emit("read", { conversation_id: "c1", reader_id: ANNA.id, read_at: new Date().toISOString() });
+  await engine.job("messages-whatsapp/sync");
+
+  const [kept] = (await chat("c1")).messages;
+  expect(kept?.reactions).toMatchObject([{ from: { handle: ANNA.phone }, from_me: false, kind: "👍" }]);
+  expect(kept?.read).not.toBeNull();
+});
+
+test("the person's own reaction is theirs before any message of theirs was seen", async () => {
+  const { engine, fake, chat } = await setUp();
+  fake.chat("c1", [ANNA]);
+  const cake = fake.history("c1", ANNA, "Cake!", 5, { reactions: [{ sender_id: ME.id, emoji: "😍" }] });
+  await engine.job("messages-whatsapp/sync");
+
+  fake.emit("reaction", {
+    conversation_id: "c1",
+    message_id: String(cake.id),
+    sender_id: ME.id,
+    emoji: "🎉",
+    at: new Date().toISOString(),
+  });
+  await engine.job("messages-whatsapp/sync");
+
+  expect((await chat("c1")).messages[0]?.reactions).toEqual([{ from: null, from_me: true, kind: "🎉" }]);
+  const handles = await engine.collection("people/handles").query({});
+  expect(handles.map(({ value }) => value)).not.toContain(ME.phone);
+});
