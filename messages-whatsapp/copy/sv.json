@@ -1,0 +1,6 @@
+{
+  "settings.kept_days.title": "Dagar med meddelanden som sparas",
+  "settings.kept_days.description": "Meddelanden som är äldre än så tas bort här. WhatsApp sparar ingen kopia, så ett borttaget meddelande kan inte komma tillbaka.",
+  "settings.chats.title": "Chattar som sparas",
+  "settings.chats.description": "Hur många av de senaste WhatsApp-chattarna som visas här."
+}
