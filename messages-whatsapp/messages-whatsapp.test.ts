@@ -1,6 +1,7 @@
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, failureFrom, test } from "@empty/module-sdk/testing";
+import { openConversation } from "./actions";
 import { ANNA, BO, ME, setUp } from "./fakeHelper.test-harness";
 import { UNSUPPORTED } from "./whatsapp";
 
@@ -360,4 +361,24 @@ test("a sync with the WhatsApp connection gone marks the account gone", async ()
 
   const [account] = await engine.collection("messages/accounts").query({});
   expect(account?.gone_at).not.toBeNull();
+});
+
+test("a chat with one person opens in WhatsApp at wa.me with their number, and a group says to use the phone", async () => {
+  const { engine, fake } = await setUp();
+  fake.chat("c1", [ANNA]);
+  fake.chat("g1", [ANNA, BO], { group: true, name: "Family" });
+  await engine.job("messages-whatsapp/sync");
+
+  const opened: string[] = [];
+  const context = {
+    ...engine.context("messages-whatsapp"),
+    openLink: async (url: string) => void opened.push(url),
+  };
+
+  await openConversation(context, { account: "whatsapp", conversation: "c1" });
+
+  expect(opened).toEqual(["https://wa.me/46701234567"]);
+  await expect(
+    openConversation(context, { account: "whatsapp", conversation: "g1" }),
+  ).rejects.toThrow("open it in WhatsApp on the phone");
 });
