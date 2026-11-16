@@ -1,0 +1,29 @@
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1"
+
+jobs:
+  check:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download the newest Empty
+        run: |
+          url=$(curl -fsSL https://empty.rcusahlberg.se/download/latest.json | jq -r '.platforms["darwin-aarch64"].url')
+          curl -fsSL "$url" | tar xz
+      - name: Check the module in a fresh app home
+        run: |
+          engine="$PWD/Empty.app/Contents/MacOS/Empty"
+          home="$RUNNER_TEMP/home"
+          mkdir -p "$home/modules"
+          cp -R messages-whatsapp "$home/modules/"
+          (sleep 900 | "$engine" --home "$home" --secrets-service empty-recipe-ci) &
+          for _ in $(seq 1 60); do "$engine" cli status --home "$home" >/dev/null 2>&1 && break; sleep 2; done
+          plutil -extract CFBundleShortVersionString raw Empty.app/Contents/Info.plist
+          "$engine" cli check messages-whatsapp --home "$home"
