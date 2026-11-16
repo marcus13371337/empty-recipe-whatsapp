@@ -1,0 +1,6 @@
+{
+  "settings.kept_days.title": "Days of messages kept",
+  "settings.kept_days.description": "Messages older than this are dropped here. WhatsApp keeps no copy, so a dropped message can't come back.",
+  "settings.chats.title": "Chats kept",
+  "settings.chats.description": "How many of the latest WhatsApp chats are shown here."
+}
