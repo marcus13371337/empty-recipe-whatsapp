@@ -26,6 +26,7 @@ type Chat = { id: string; kind: "direct" | "group"; people: Someone[]; name: str
 export function fakeHelper() {
   const folder = mkdtempSync(join(tmpdir(), "whatsapp-helper-"));
   const chats = new Map<string, Chat>();
+  const announced = new Set<string>();
   const listeners = new Map<string, Set<(data: JsonValue) => void>>();
   const asked: { method: string; params: JsonObject }[] = [];
   let linked = true;
@@ -150,7 +151,10 @@ export function fakeHelper() {
     history(chat: string, from: Someone, text: string, minutes: number, more: JsonObject = {}) {
       const kept = chats.get(chat);
       const said = message(chat, from, text, minutes, { history: true, ...more });
-      if (kept) emit("conversation", listing(kept));
+      if (kept && !announced.has(chat)) {
+        announced.add(chat);
+        emit("conversation", listing(kept));
+      }
       emit("message", said);
       return said;
     },
