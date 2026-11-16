@@ -40,7 +40,7 @@ Tell the person, in your own words, and go on only on their yes:
    ```
 
 8. Add `messages` to `on` in `modules.json`, if it is not there.
-9. Check that `empty status` shows `messages-whatsapp` and the `whatsapp` connection without an error. The connection must be running before the phone is linked: it is what hears the history the phone sends.
+9. Check that `empty status` shows the `whatsapp` connection as `connected`, with 6 tools. Until the next step, its sync fails saying the WhatsApp helper is not added yet; that is expected. The connection must be running before the phone is linked: it is what hears the history the phone sends.
 10. `empty helper-program add messages-whatsapp/whatsapp`. The person sees what the helper is, where it comes from and what it may do, and says yes or no. On their yes, the app opens a dialog with a QR code. Tell them: on the phone, open WhatsApp, Settings, Linked devices, Link a device, and point the phone at the code. If they would rather type a code, they switch the dialog to a phone number, enter the number in international form, and on the phone choose Link with phone number instead and type the code the app shows. The dialog closes once linked. You never see the code's link, and never ask them for a code or their number in the chat.
 11. Wait until `empty status` shows the helper as `running`, not `starting` or `signed_out`. If it shows `failed`, read its error and fix that before going on. If the dialog closed before they linked, `empty helper-program sign-in messages-whatsapp/whatsapp` opens it again; so does Sign in under Settings → Connections.
 12. The phone now sends recent history. It comes in as it arrives, and everything is synced every 5 minutes. `empty run messages-whatsapp --job sync` syncs at once.
