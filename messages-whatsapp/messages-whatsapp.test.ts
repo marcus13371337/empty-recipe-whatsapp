@@ -54,3 +54,38 @@ test("a linking history larger than one batch, in a chat beyond the chats kept, 
   expect((await chat("old")).messages).toHaveLength(1200);
   expect((await chat("new")).messages).toHaveLength(1);
 });
+
+test("history older than the days kept is dropped, and more days kept keep it", async () => {
+  const { engine, fake, chat } = await setUp();
+  fake.chat("c1", [ANNA]);
+  await engine.set("messages-whatsapp/kept_days", 365);
+  fake.history("c1", ANNA, "Last summer", 60 * 24 * 200);
+  fake.history("c1", ANNA, "Last week", 60 * 24 * 7);
+
+  await engine.job("messages-whatsapp/sync");
+
+  expect((await chat("c1")).messages.map(({ text }) => text)).toEqual(["Last summer", "Last week"]);
+});
+
+for (const [code, words] of [
+  ["unlinked", "The device was removed under Linked devices, or the phone was offline for about 14 days."],
+  ["phone_gone", "WhatsApp on the phone was logged out, reinstalled or moved to another phone."],
+  ["banned", "WhatsApp banned this number."],
+  ["temporary_ban", "WhatsApp banned this number until 2026-12-01."],
+  ["replaced", "Another program connected with the same link."],
+  ["client_outdated", "WhatsApp no longer accepts this helper version. Update it."],
+] as const) {
+  test(`a link that ended as ${code} wakes a sync, and the account says why in the helper's words`, async () => {
+    const { engine, fake, changes } = await setUp();
+    fake.chat("c1", [ANNA]);
+    await engine.job("messages-whatsapp/sync");
+    const before = changes();
+
+    fake.logOut(code, words);
+    expect(changes()).toBe(before + 1);
+    await expect(engine.job("messages-whatsapp/sync")).rejects.toThrow();
+
+    const [account] = await engine.collection("messages/accounts").query({});
+    expect(account?.problem).toBe(words);
+  });
+}
