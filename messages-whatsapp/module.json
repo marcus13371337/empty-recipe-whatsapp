@@ -18,8 +18,7 @@
     }
   },
   "uses": [
-    "messages",
-    "people"
+    "messages"
   ],
   "connectors": [
     "whatsapp"
