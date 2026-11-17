@@ -100,5 +100,5 @@ The tests run against a fake helper. Before you publish a new commit or move the
 - remove the device on the phone, see the account say why and the app ask to link again, then link by code
 - send a text and a picture, and receive one sent from the phone
 - react from the phone, and see it in the chat; read a message on the phone, and see it marked read in the chat
-- see one-to-one people as phone numbers in People, linked to the right someone once linked
+- with `messages-people` on, see one-to-one people named from People by their phone number
 - open a one-to-one chat in WhatsApp from Messages
