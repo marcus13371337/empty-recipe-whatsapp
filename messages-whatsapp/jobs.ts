@@ -18,7 +18,7 @@ import {
   SERVICE,
 } from "./whatsapp";
 
-const BATCH = 500;
+export const BATCH = 500;
 const MOST_BATCHES = 100;
 const SKIPPED_OUTAGES: readonly FailedBecause[] = ["asleep", "timeout"];
 
@@ -35,23 +35,27 @@ const messagesIn = (value: JsonValue | undefined): Message[] =>
 const conversationsIn = (value: JsonValue | undefined) =>
   listOf(value).flatMap((entry) => keptConversation(entry) ?? []);
 
-const isLater = (m: Message, than: Message | undefined) =>
-  than === undefined || Date.parse(m.sent) >= Date.parse(than.sent);
+const isLater = (message: Message, than: Message | undefined) =>
+  than === undefined || Date.parse(message.sent) >= Date.parse(than.sent);
 
-function keepNewest(newest: Map<string, Message>, m: Message) {
-  if (isLater(m, newest.get(m.conversation))) newest.set(m.conversation, m);
+function keepNewest(newest: Map<string, Message>, message: Message) {
+  if (isLater(message, newest.get(message.conversation))) newest.set(message.conversation, message);
 }
 
-const storedLine = (
-  conversation: string,
-  id: string,
-  line: { text?: string | null; sent: string; from_me?: boolean | null; attachments?: JsonValue },
-): Message => ({
-  id,
+type StoredLine = {
+  id: string;
+  sent: string;
+  text: string | null;
+  from_me: boolean | null;
+  attachments?: JsonValue;
+};
+
+const storedLine = (conversation: string, line: StoredLine): Message => ({
+  id: line.id,
   conversation,
   from: null,
   from_me: line.from_me ?? false,
-  text: line.text ?? null,
+  text: line.text,
   sent: line.sent,
   attachments: keptAttachments(line.attachments),
   reactions: [],
@@ -66,16 +70,30 @@ async function newestStored(context: JobContext, account: string | undefined) {
     if (last_at) {
       keepNewest(
         newest,
-        storedLine(source_id, `${source_id}/last`, { text: last_text, sent: last_at, from_me: last_from_me }),
+        storedLine(source_id, {
+          id: `${source_id}/last`,
+          sent: last_at,
+          text: last_text ?? null,
+          from_me: last_from_me ?? null,
+        }),
       );
     }
     const [row] = await context.collection("messages/messages").query({
-      where: { conversation: id },
+      where: { conversation: id, source_id: { ne: null } },
       orderBy: [{ field: "sent", direction: "desc" }],
       limit: 1,
     });
     if (row?.source_id && row.sent) {
-      keepNewest(newest, storedLine(source_id, row.source_id, { ...row, sent: row.sent }));
+      keepNewest(
+        newest,
+        storedLine(source_id, {
+          id: row.source_id,
+          sent: row.sent,
+          text: row.text ?? null,
+          from_me: row.from_me ?? null,
+          attachments: row.attachments,
+        }),
+      );
     }
   }
   return newest;

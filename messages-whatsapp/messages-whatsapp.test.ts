@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { expect, failureFrom, test } from "@empty/module-sdk/testing";
 import { openConversation } from "./actions";
 import { ANNA, BO, ME, setUp } from "./fakeHelper.test-harness";
+import { BATCH } from "./jobs";
 import { UNSUPPORTED } from "./whatsapp";
 
 test("the history the phone sends at linking is kept, chats named as in WhatsApp", async () => {
@@ -113,7 +114,7 @@ test("an older message in a later batch leaves the chat's latest on the newer on
   fake.chat("g1", [ANNA, BO], { group: true, name: "Family" });
   fake.chat("other", [BO]);
   const newer = fake.history("g1", BO, "Newer", 10);
-  for (let minute = 500; minute > 0; minute -= 1) fake.history("other", BO, `Line ${minute}`, minute + 60);
+  for (let minute = BATCH; minute > 0; minute -= 1) fake.history("other", BO, `Line ${minute}`, minute + 60);
   fake.history("g1", ANNA, "Older", 60 * 24 * 14);
 
   await engine.job("messages-whatsapp/sync");
@@ -139,6 +140,23 @@ test("a sync with no events moves a stale latest up to the newest message kept",
   expect((await chat("g1")).conversation).toMatchObject({ last_text: "Newer", last_at: newer.sent_at });
 });
 
+test("a reply still waiting to go out leaves a stale latest corrected by the newest message kept", async () => {
+  const { engine, fake, chat } = await setUp();
+  fake.chat("g1", [ANNA, BO], { group: true, name: "Family" });
+  const newer = fake.history("g1", BO, "Newer", 10);
+  await engine.job("messages-whatsapp/sync");
+  const { conversation } = await chat("g1");
+  await engine.run("messages/send", { conversation: conversation?.id ?? "", text: "Waiting" });
+  await engine.collection("messages/conversations").update(conversation?.id ?? "", {
+    last_text: "Stale",
+    last_at: new Date(Date.now() - 15 * 86_400_000).toISOString(),
+  });
+
+  await engine.job("messages-whatsapp/sync");
+
+  expect((await chat("g1")).conversation).toMatchObject({ last_text: "Newer", last_at: newer.sent_at });
+});
+
 test("a picture without text stays the chat's latest line through a later sync", async () => {
   const { engine, fake, chat } = await setUp();
   fake.chat("c1", [ANNA]);
@@ -146,12 +164,11 @@ test("a picture without text stays the chat's latest line through a later sync",
     attachments: [{ id: "a1", kind: "image", type: "image/png", name: "cat.png", ref: "r1" }],
   });
   await engine.job("messages-whatsapp/sync");
-  const before = (await chat("c1")).conversation?.last_text;
+  expect((await chat("c1")).conversation?.last_text).toBe("Photo");
 
   await engine.job("messages-whatsapp/sync");
 
-  expect(before).toBeTruthy();
-  expect((await chat("c1")).conversation?.last_text).toBe(before);
+  expect((await chat("c1")).conversation?.last_text).toBe("Photo");
 });
 
 test("a reaction and a read receipt change a message already kept", async () => {
