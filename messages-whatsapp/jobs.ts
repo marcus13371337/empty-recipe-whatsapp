@@ -4,6 +4,7 @@ import {
   ACCOUNT,
   CONNECTION,
   type Conversation,
+  keptAttachments,
   keptConversation,
   keptMessage,
   keptReactionChange,
@@ -17,7 +18,7 @@ import {
   SERVICE,
 } from "./whatsapp";
 
-const BATCH = 500;
+export const BATCH = 500;
 const MOST_BATCHES = 100;
 const SKIPPED_OUTAGES: readonly FailedBecause[] = ["asleep", "timeout"];
 
@@ -34,24 +35,68 @@ const messagesIn = (value: JsonValue | undefined): Message[] =>
 const conversationsIn = (value: JsonValue | undefined) =>
   listOf(value).flatMap((entry) => keptConversation(entry) ?? []);
 
-async function lastLines(context: JobContext, account: string | undefined) {
-  const last = new Map<string, Message>();
-  if (account === undefined) return last;
-  const rows = await context.collection("messages/conversations").query({ where: { account } });
-  for (const { source_id, last_text, last_at, last_from_me } of rows) {
-    if (!source_id || !last_at) continue;
-    last.set(source_id, {
-      id: `${source_id}/last`,
-      conversation: source_id,
-      from: null,
-      from_me: last_from_me ?? false,
-      text: last_text ?? null,
-      sent: last_at,
-      attachments: [],
-      reactions: [],
+const isLater = (message: Message, than: Message | undefined) =>
+  than === undefined || Date.parse(message.sent) >= Date.parse(than.sent);
+
+function keepNewest(newest: Map<string, Message>, message: Message) {
+  if (isLater(message, newest.get(message.conversation))) newest.set(message.conversation, message);
+}
+
+type StoredLine = {
+  id: string;
+  sent: string;
+  text: string | null;
+  from_me: boolean | null;
+  attachments?: JsonValue;
+};
+
+const storedLine = (conversation: string, line: StoredLine): Message => ({
+  id: line.id,
+  conversation,
+  from: null,
+  from_me: line.from_me ?? false,
+  text: line.text,
+  sent: line.sent,
+  attachments: keptAttachments(line.attachments),
+  reactions: [],
+});
+
+async function newestStored(context: JobContext, account: string | undefined) {
+  const newest = new Map<string, Message>();
+  if (account === undefined) return newest;
+  const chats = await context.collection("messages/conversations").query({ where: { account } });
+  for (const { id, source_id, last_text, last_at, last_from_me } of chats) {
+    if (!source_id) continue;
+    if (last_at) {
+      keepNewest(
+        newest,
+        storedLine(source_id, {
+          id: `${source_id}/last`,
+          sent: last_at,
+          text: last_text ?? null,
+          from_me: last_from_me ?? null,
+        }),
+      );
+    }
+    const [row] = await context.collection("messages/messages").query({
+      where: { conversation: id, source_id: { ne: null } },
+      orderBy: [{ field: "sent", direction: "desc" }],
+      limit: 1,
     });
+    if (row?.source_id && row.sent) {
+      keepNewest(
+        newest,
+        storedLine(source_id, {
+          id: row.source_id,
+          sent: row.sent,
+          text: row.text ?? null,
+          from_me: row.from_me ?? null,
+          attachments: row.attachments,
+        }),
+      );
+    }
   }
-  return last;
+  return newest;
 }
 
 type Changed = {
@@ -168,7 +213,7 @@ export async function syncAccount(context: JobContext, now = new Date()) {
       objectOf(await context.connectors.call(CONNECTION, "conversations", { limit: chats }))
         .conversations,
     );
-    const newest = await lastLines(context, kept?.id);
+    const newest = await newestStored(context, kept?.id);
     const met: Person[] = [];
     let synced: JsonValue = null;
     for (let batch = 0; batch < MOST_BATCHES; batch += 1) {
@@ -178,9 +223,7 @@ export async function syncAccount(context: JobContext, now = new Date()) {
       const messages = unique(messagesIn(waiting.messages)).filter(
         ({ sent }) => Date.parse(sent) >= since.getTime(),
       );
-      for (const message of [...messages].sort((a, b) => Date.parse(a.sent) - Date.parse(b.sent))) {
-        newest.set(message.conversation, message);
-      }
+      for (const message of messages) keepNewest(newest, message);
       const taken = conversationsIn(waiting.conversations);
       const conversations = unique([...listed, ...taken]).map((conversation) => {
         const last = newest.get(conversation.id);

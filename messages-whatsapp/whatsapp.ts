@@ -171,7 +171,7 @@ export const personIn = (value: JsonValue | undefined): Person | null => {
   return { handle, kind: person.kind === "phone" ? "phone" : "id", name: textOf(person.name) };
 };
 
-const keptAttachments = (value: JsonValue | undefined): Attachment[] =>
+export const keptAttachments = (value: JsonValue | undefined): Attachment[] =>
   listOf(value).flatMap((entry) => {
     const attachment = objectOf(entry);
     const id = textOf(attachment.id);

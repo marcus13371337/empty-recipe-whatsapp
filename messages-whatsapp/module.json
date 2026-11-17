@@ -2,7 +2,7 @@
   "id": "messages-whatsapp",
   "name": "WhatsApp",
   "description": "Brings the person's WhatsApp chats into the messages module and sends through it.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "settings": {
     "kept_days": {
       "type": "integer",
