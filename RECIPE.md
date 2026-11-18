@@ -16,18 +16,18 @@ Tell the person, in your own words, and go on only on their yes:
 
 ## Needs
 
-- Empty 0.9.9 or newer: helper programs linked from the phone ([empty-app#557](https://github.com/Ahl-berg-Innovation-AB/empty-app/issues/557)), and tests that bring in the modules a module uses. `empty check` refuses the module on an older app.
+- Empty 0.9.14 or newer: modules stated in code, in `module.ts`. `empty check` refuses the module on an older app.
 - A Mac with Apple silicon or Intel.
 - A phone with WhatsApp on the number to link.
 
 ## Add it
 
-1. `empty recipes get marcus13371337/empty-recipe-whatsapp`. It pins the newest commit and puts its files in `recipes/marcus13371337/empty-recipe-whatsapp/`, not in `modules/`.
-2. Read every file in `messages-whatsapp/`. Check that each `sha256` under `helperPrograms` in `module.json` matches the line for that file in the release's `checksums.txt`, at `https://github.com/marcus13371337/whatsapp-helper/releases/download/v<version>/checksums.txt`.
+1. `empty recipes get marcus13371337/empty-recipe-whatsapp`. It puts the latest release's files in `recipes/marcus13371337/empty-recipe-whatsapp/`, not in `modules/`.
+2. Read every file in `messages-whatsapp/`. Check that each `sha256` under `helperPrograms` in `module.ts` matches the line for that file in the release's `checksums.txt`, at `https://github.com/marcus13371337/whatsapp-helper/releases/download/v<version>/checksums.txt`.
 3. Run `empty check recipes/marcus13371337/empty-recipe-whatsapp/messages-whatsapp`. It type-checks the module and runs its tests on this app.
 4. Tell the person about the risk (above) and who publishes this, and go on only on their yes.
 5. Ask how much to keep, before linking, since the history comes once: how many days of messages (`kept_days`, 30 unless they say more; the phone may send months) and how many recent chats to list (`chats`, 100).
-6. Copy `messages-whatsapp/` to `modules/messages-whatsapp/`, and add a last line to its `README.md`: `From marcus13371337/empty-recipe-whatsapp at <commit>.` Set what they chose with `empty set messages-whatsapp/kept_days <days>` and `empty set messages-whatsapp/chats <count>`.
+6. `empty clone marcus13371337/empty-recipe-whatsapp/messages-whatsapp messages-whatsapp` copies it into `modules/messages-whatsapp/`. Set what they chose with `empty set messages-whatsapp/kept_days <days>` and `empty set messages-whatsapp/chats <count>`.
 7. Add the connection to `connectors.json`:
 
    ```json
@@ -80,10 +80,12 @@ If they said no, Settings → Connections shows the helper as signed out with a 
 The helper follows WhatsApp's changes, so new releases come often. To move to one:
 
 1. Read its release notes. Check that the protocol is still `1`: `whatsapp-helper --version` prints it, and so do the release notes.
-2. Change `version`, and each platform's `url` and `sha256`, in `module.json` under `helperPrograms`. Take the checksums from that release's `checksums.txt`, never from a file you downloaded yourself.
+2. Change `version`, and each platform's `url` and `sha256`, in `module.ts` under `helperPrograms`. Take the checksums from that release's `checksums.txt`, never from a file you downloaded yourself.
 3. `empty check messages-whatsapp`, then `empty helper-program add messages-whatsapp/whatsapp`. The old version keeps running until the person says yes.
 
-To update the recipe itself, read what changed between the commit named in `modules/messages-whatsapp/README.md` and the newest, tell the person, fetch and check it in `recipes/` as above, and copy the module again with the new commit.
+To update the recipe itself, `empty follow messages-whatsapp` shows what changed in the newest release. Read it as a stranger's code, tell the person, and on their yes `empty follow messages-whatsapp --done`.
+
+A copy made by hand before Empty 0.9.14 names its commit in a last `README.md` line. It doesn't load on 0.9.14, and `empty follow` doesn't know it. Look for changes of the person's own by comparing it with that commit, fetched with `empty recipes get marcus13371337/empty-recipe-whatsapp <commit>`. Then delete `modules/messages-whatsapp/` and do steps 1 to 3 and 6 of "Add it" again, with the `kept_days` and `chats` they had, and carry their changes over. The connection, the helper and its link, and the chats kept all stay.
 
 ## Remove it all
 
