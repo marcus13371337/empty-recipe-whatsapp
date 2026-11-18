@@ -1,5 +1,5 @@
 import type { ActionAnswer, ActionArgs, JobContext } from "@empty/module-sdk";
-import { listOf, objectOf, textOf } from "./json";
+import { listOf, numberOf, objectOf, textOf } from "./json";
 import { ACCOUNT, CONNECTION, NO_REF } from "./whatsapp";
 
 export async function older() {
@@ -15,9 +15,20 @@ export async function attachment(
   { id }: ActionArgs<"messages-whatsapp/attachment">,
 ): Promise<ActionAnswer<"messages-whatsapp/attachment">> {
   if (id.startsWith(NO_REF)) throw context.fail("fail.notHandedOver");
-  return context.connectors.call(CONNECTION, "attachment", { id }) as Promise<
-    ActionAnswer<"messages-whatsapp/attachment">
-  >;
+  const answer = objectOf(await context.connectors.call(CONNECTION, "attachment", { id }));
+  const kept = objectOf(answer.attachment);
+  const file = objectOf(answer.file);
+  const size = numberOf(kept.size);
+  return {
+    attachment: {
+      id: textOf(kept.id) ?? id,
+      name: textOf(kept.name) ?? "",
+      media_type: textOf(kept.media_type),
+      ...(size !== null && { size }),
+    },
+    file: { base64: textOf(file.base64) ?? "", media_type: textOf(file.media_type) ?? "" },
+    kept: "here",
+  };
 }
 
 export async function openAttachment(context: JobContext): Promise<never> {

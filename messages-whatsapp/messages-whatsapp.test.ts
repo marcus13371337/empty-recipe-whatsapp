@@ -345,6 +345,22 @@ test("a reply the person said no to is kept as refused by them", async () => {
   expect(reply?.failed_because).toBe("refused_by_person");
 });
 
+test("a reply whose send timed out is kept as maybe sent, and not sent again", async () => {
+  const { engine, fake, chat } = await setUp();
+  fake.chat("c1", [ANNA]);
+  await engine.job("messages-whatsapp/sync");
+  const { conversation } = await chat("c1");
+  engine.refuse("whatsapp", "send", failureFrom("Too slow.", "timeout"));
+
+  await engine.run("messages/send", { conversation: conversation?.id ?? "", text: "Here" });
+  await engine.job("messages-whatsapp/send");
+  await engine.job("messages-whatsapp/send");
+
+  const reply = (await chat("c1")).messages.find(({ text }) => text === "Here");
+  expect(reply?.failed_because).toBe("maybe_sent");
+  expect(engine.calls.filter(({ tool }) => tool === "send")).toHaveLength(1);
+});
+
 test("an attachment is fetched from the helper, and its file in the helper's folder is removed", async () => {
   const { engine, fake, chat } = await setUp();
   fake.chat("c1", [ANNA]);

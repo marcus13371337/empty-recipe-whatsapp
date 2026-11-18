@@ -265,7 +265,9 @@ async function inTheHelpersWords<Result>(context: JobContext, work: () => Promis
     );
     const words = textOf(state.message);
     if (words === null) throw error;
-    throw Object.assign(new Error(words), { reason: context.connectors.failedBecause(error) });
+    throw Object.assign(new Error(words, { cause: error }), {
+      reason: context.connectors.failedBecause(error),
+    });
   }
 }
 
@@ -275,7 +277,7 @@ export const sync = job(
     every: "5m",
     catchUp: true,
     when: [
-      { connector: CONNECTION, on: ["changed", "added", "removed"] },
+      { connector: CONNECTION },
       { setting: "messages-whatsapp/kept_days" },
       { setting: "messages-whatsapp/chats" },
     ],
@@ -298,11 +300,16 @@ export const send = job(
   async (context: JobContext) => {
     const sent = await context.sources.drain("messages/messages", async (due) => {
       if (!due.conversation) throw context.sources.refusal("cannot_do_here");
-      await context.connectors.call(CONNECTION, "send", {
-        conversation: due.conversation,
-        ...(due.text !== null && { text: due.text }),
-        ...(due.files.length > 0 && { files: due.files }),
-      });
+      await context.connectors
+        .call(CONNECTION, "send", {
+          conversation: due.conversation,
+          ...(due.text !== null && { text: due.text }),
+          ...(due.files.length > 0 && { files: due.files }),
+        })
+        .catch((error: Error) => {
+          if (context.connectors.failedBecause(error) !== "timeout") throw error;
+          throw context.sources.refusal("maybe_sent");
+        });
       await syncAccount(context).catch((unsynced: Error) =>
         console.warn(`Sent, but the chat did not sync after it: ${unsynced.message}`),
       );
