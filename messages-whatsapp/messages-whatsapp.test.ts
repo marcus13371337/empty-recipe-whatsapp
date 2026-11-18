@@ -192,7 +192,7 @@ test("a reaction and a read receipt change a message already kept", async () => 
   expect(kept?.reactions).toMatchObject([
     { from: { handle: ANNA.phone, kind: "phone" }, from_me: false, kind: "❤️" },
   ]);
-  expect(kept?.read).not.toBeNull();
+  expect(kept?.read_at).not.toBeNull();
 });
 
 test("a reaction taken back leaves the message without it", async () => {
@@ -229,7 +229,7 @@ test("reading on the person's own other device marks none of their messages read
   fake.emit("read", { conversation_id: "c1", reader_id: ME.id, read_at: new Date().toISOString() });
   await engine.job("messages-whatsapp/sync");
 
-  expect((await chat("c1")).messages[0]?.read).toBeNull();
+  expect((await chat("c1")).messages[0]?.read_at).toBeNull();
 });
 
 test("a read receipt stays when a later sync brings the chat again", async () => {
@@ -244,7 +244,7 @@ test("a read receipt stays when a later sync brings the chat again", async () =>
   await engine.job("messages-whatsapp/sync");
 
   const [mine] = (await chat("c1")).messages;
-  expect(mine?.read).not.toBeNull();
+  expect(mine?.read_at).not.toBeNull();
 });
 
 test("the person's own reaction in the linking history is theirs", async () => {
@@ -256,7 +256,7 @@ test("the person's own reaction in the linking history is theirs", async () => {
   await engine.job("messages-whatsapp/sync");
 
   const cake = (await chat("c1")).messages.find(({ text }) => text === "Cake!");
-  expect(cake?.reactions).toEqual([{ from: null, from_me: true, kind: "😍" }]);
+  expect(cake?.reactions).toMatchObject([{ from: null, from_me: true, kind: "😍" }]);
 });
 
 test("a message WhatsApp can't carry says to open it in WhatsApp", async () => {
@@ -283,10 +283,10 @@ test("people carry their phone number where WhatsApp gives one, else their Whats
   ]);
   expect(family.messages[0]).toMatchObject({ from_handle: BO.id, from_kind: "id" });
   const handles = await engine.collection("people/handles").query({});
-  expect(handles.map(({ kind, service, value, someone }) => ({ kind, service, value, someone }))).toEqual(
+  expect(handles).toEqual(
     expect.arrayContaining([
-      { kind: "phone", service: null, value: ANNA.phone, someone: null },
-      { kind: "id", service: "WhatsApp", value: BO.id, someone: null },
+      expect.objectContaining({ kind: "phone", service: null, value: ANNA.phone, someone: null }),
+      expect.objectContaining({ kind: "id", service: "WhatsApp", value: BO.id, someone: null }),
     ]),
   );
 });
@@ -345,6 +345,22 @@ test("a reply the person said no to is kept as refused by them", async () => {
   expect(reply?.failed_because).toBe("refused_by_person");
 });
 
+test("a reply whose send timed out is kept as maybe sent, and not sent again", async () => {
+  const { engine, fake, chat } = await setUp();
+  fake.chat("c1", [ANNA]);
+  await engine.job("messages-whatsapp/sync");
+  const { conversation } = await chat("c1");
+  engine.refuse("whatsapp", "send", failureFrom("Too slow.", "timeout"));
+
+  await engine.run("messages/send", { conversation: conversation?.id ?? "", text: "Here" });
+  await engine.job("messages-whatsapp/send");
+  await engine.job("messages-whatsapp/send");
+
+  const reply = (await chat("c1")).messages.find(({ text }) => text === "Here");
+  expect(reply?.failed_because).toBe("maybe_sent");
+  expect(engine.calls.filter(({ tool }) => tool === "send")).toHaveLength(1);
+});
+
 test("an attachment is fetched from the helper, and its file in the helper's folder is removed", async () => {
   const { engine, fake, chat } = await setUp();
   fake.chat("c1", [ANNA]);
@@ -361,9 +377,27 @@ test("an attachment is fetched from the helper, and its file in the helper's fol
 
   expect(answer).toMatchObject({
     kept: "here",
-    file: { base64: Buffer.from("a picture").toString("base64"), mediaType: "image/png" },
+    file: { base64: Buffer.from("a picture").toString("base64"), media_type: "image/png" },
   });
   expect(existsSync(join(fake.folder, "r1.png"))).toBe(false);
+});
+
+test("a file WhatsApp has not handed over says to open the chat in WhatsApp, and the helper is not asked", async () => {
+  const { engine, fake, chat } = await setUp();
+  fake.chat("c1", [ANNA]);
+  fake.history("c1", ANNA, "", 5, {
+    attachments: [{ id: "a1", kind: "document", type: "application/pdf", name: "plan.pdf" }],
+  });
+  await engine.job("messages-whatsapp/sync");
+  const [message] = (await chat("c1")).messages;
+
+  await expect(
+    engine.run("messages-whatsapp/attachment", {
+      account: "whatsapp",
+      id: message?.attachments[0]?.id ?? "",
+    }),
+  ).rejects.toThrow("has not handed this file over");
+  expect(fake.asked.filter(({ method }) => method === "attachment")).toEqual([]);
 });
 
 test("a WhatsApp file can't be opened on the Mac, and says to open the chat in WhatsApp", async () => {
@@ -465,7 +499,7 @@ test("a reaction and a read receipt reach a message kept before the connection r
 
   const [kept] = (await chat("c1")).messages;
   expect(kept?.reactions).toMatchObject([{ from: { handle: ANNA.phone }, from_me: false, kind: "👍" }]);
-  expect(kept?.read).not.toBeNull();
+  expect(kept?.read_at).not.toBeNull();
 });
 
 test("the person's own reaction is theirs before any message of theirs was seen", async () => {
@@ -483,7 +517,7 @@ test("the person's own reaction is theirs before any message of theirs was seen"
   });
   await engine.job("messages-whatsapp/sync");
 
-  expect((await chat("c1")).messages[0]?.reactions).toEqual([{ from: null, from_me: true, kind: "🎉" }]);
+  expect((await chat("c1")).messages[0]?.reactions).toMatchObject([{ from: null, from_me: true, kind: "🎉" }]);
   const handles = await engine.collection("people/handles").query({});
   expect(handles.map(({ value }) => value)).not.toContain(ME.phone);
 });
@@ -517,5 +551,5 @@ test("the person's own reaction in a group is theirs once a one-to-one chat show
 
   await engine.job("messages-whatsapp/sync");
 
-  expect((await chat("g1")).messages[0]?.reactions).toEqual([{ from: null, from_me: true, kind: "😍" }]);
+  expect((await chat("g1")).messages[0]?.reactions).toMatchObject([{ from: null, from_me: true, kind: "😍" }]);
 });

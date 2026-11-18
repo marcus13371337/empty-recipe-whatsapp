@@ -14,6 +14,3 @@ export const textOf = (value: JsonValue | undefined): string | null =>
 
 export const numberOf = (value: JsonValue | undefined): number | null =>
   typeof value === "number" ? value : null;
-
-export const reasonOf = (error: unknown) =>
-  error instanceof Error ? error.message : String(error);

@@ -8,6 +8,7 @@ A recipe for [Empty](https://empty.rcusahlberg.se): a person's builder agent fol
 
 - `RECIPE.md`: the steps for the builder: the risk, adding, linking, updating and removing.
 - `messages-whatsapp/`: the module the builder copies into the app home.
+  - `module.written.json` is written by the app from `module.ts`; cloning the recipe reads it, so commit it after each change.
   - `connections/whatsapp.ts` speaks the helper's [protocol](https://github.com/marcus13371337/whatsapp-helper/blob/main/PROTOCOL.md) and keeps what arrives until a sync takes it.
   - `jobs.ts` syncs and sends through the `messages` module and adds the people it meets to `people`, `actions.ts` answers its attachment and open-chat questions.
   - `messages-whatsapp.test.ts` runs it all against `fakeHelper.test-harness.ts`, a stand-in for the helper.
