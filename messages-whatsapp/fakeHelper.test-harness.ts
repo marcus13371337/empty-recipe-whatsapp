@@ -7,7 +7,10 @@ import * as actions from "./actions";
 import { whatsappConnection } from "./connections/whatsapp";
 import * as jobs from "./jobs";
 import { objectOf, textOf } from "./json";
+import en from "./copy/en.json";
+import sv from "./copy/sv.json";
 import manifest from "./module.json";
+import statement from "./module";
 
 type Someone = { id: string; name: string; phone: string | null };
 
@@ -183,8 +186,11 @@ export async function setUp() {
   let changes = 0;
   await connection.watch?.(() => (changes += 1), { ...context, signal: stop.signal });
   const engine = testEngine({
-    modules: [await appModule("messages"), { manifest, actions, jobs }],
-    connections: [{ name: "whatsapp", kind: "stdio" }],
+    modules: [
+      await appModule("messages"),
+      { manifest, module: statement, actions, jobs, copy: { en, sv } },
+    ],
+    connectors: [{ name: "whatsapp", kind: "stdio" }],
     connector: async (_server, tool, args) => {
       const found = connection.tools[tool];
       if (!found) throw new Error(`No tool "${tool}".`);
@@ -197,7 +203,7 @@ export async function setUp() {
       .query({ where: { source_id } });
     const messages = await engine.collection("messages/messages").query({
       where: { conversation: conversation?.id ?? "" },
-      orderBy: [{ field: "sent" }],
+      orderBy: [{ field: "sent_at" }],
     });
     return { conversation, messages };
   };

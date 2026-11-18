@@ -1,6 +1,6 @@
-import type { ActionArgs, JobContext } from "@empty/module-sdk";
+import type { ActionAnswer, ActionArgs, JobContext } from "@empty/module-sdk";
 import { listOf, objectOf, textOf } from "./json";
-import { ACCOUNT, CONNECTION } from "./whatsapp";
+import { ACCOUNT, CONNECTION, NO_REF } from "./whatsapp";
 
 export async function older() {
   return { messages: [] };
@@ -13,18 +13,19 @@ export async function search() {
 export async function attachment(
   context: JobContext,
   { id }: ActionArgs<"messages-whatsapp/attachment">,
-) {
-  return context.connectors.call(CONNECTION, "attachment", { id });
+): Promise<ActionAnswer<"messages-whatsapp/attachment">> {
+  if (id.startsWith(NO_REF)) throw context.fail("fail.notHandedOver");
+  return context.connectors.call(CONNECTION, "attachment", { id }) as Promise<
+    ActionAnswer<"messages-whatsapp/attachment">
+  >;
 }
 
-const ONLY_IN_WHATSAPP = "WhatsApp files open in WhatsApp: open the chat there.";
-
-export async function openAttachment(): Promise<never> {
-  throw new Error(ONLY_IN_WHATSAPP);
+export async function openAttachment(context: JobContext): Promise<never> {
+  throw context.fail("fail.onlyInWhatsApp");
 }
 
-export async function showAttachment(): Promise<never> {
-  throw new Error(ONLY_IN_WHATSAPP);
+export async function showAttachment(context: JobContext): Promise<never> {
+  throw context.fail("fail.onlyInWhatsApp");
 }
 
 export async function openConversation(
@@ -39,9 +40,7 @@ export async function openConversation(
     .query({ where: { account: account?.id ?? "", source_id: conversation } });
   const people = listOf(chat?.participants).map(objectOf);
   const phone = people.length === 1 && people[0]?.kind === "phone" ? textOf(people[0].handle) : null;
-  if (!chat || chat.group || phone === null) {
-    throw new Error("WhatsApp has no link for this chat: open it in WhatsApp on the phone.");
-  }
+  if (!chat || chat.group || phone === null) throw context.fail("fail.noChatLink");
   await context.openLink(`https://wa.me/${phone.replace(/\D/g, "")}`);
   return { opened: true };
 }

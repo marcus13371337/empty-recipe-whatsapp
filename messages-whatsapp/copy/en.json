@@ -2,5 +2,8 @@
   "settings.kept_days.title": "Days of messages kept",
   "settings.kept_days.description": "Messages older than this are dropped here. WhatsApp keeps no copy, so a dropped message can't come back.",
   "settings.chats.title": "Chats kept",
-  "settings.chats.description": "How many of the latest WhatsApp chats are shown here."
+  "settings.chats.description": "How many of the latest WhatsApp chats are shown here.",
+  "fail.onlyInWhatsApp": "WhatsApp files open in WhatsApp: open the chat there.",
+  "fail.noChatLink": "WhatsApp has no link for this chat: open it in WhatsApp on the phone.",
+  "fail.notHandedOver": "WhatsApp has not handed this file over. Open the chat in WhatsApp."
 }

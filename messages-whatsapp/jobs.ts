@@ -1,5 +1,5 @@
-import type { FailedBecause, JobContext, JsonValue } from "@empty/module-sdk";
-import { listOf, numberOf, objectOf, reasonOf, textOf } from "./json";
+import { type JobContext, type JobEvent, type JsonValue, job } from "@empty/module-sdk";
+import { listOf, numberOf, objectOf, textOf } from "./json";
 import {
   ACCOUNT,
   CONNECTION,
@@ -20,10 +20,6 @@ import {
 
 export const BATCH = 500;
 const MOST_BATCHES = 100;
-const SKIPPED_OUTAGES: readonly FailedBecause[] = ["asleep", "timeout"];
-
-const isHere = async (context: JobContext) =>
-  (await context.connectors.list()).some(({ name }) => name === CONNECTION);
 
 function unique<T extends { id: string }>(values: T[]): T[] {
   return [...new Map(values.map((value) => [value.id, value])).values()];
@@ -36,7 +32,7 @@ const conversationsIn = (value: JsonValue | undefined) =>
   listOf(value).flatMap((entry) => keptConversation(entry) ?? []);
 
 const isLater = (message: Message, than: Message | undefined) =>
-  than === undefined || Date.parse(message.sent) >= Date.parse(than.sent);
+  than === undefined || Date.parse(message.sent_at) >= Date.parse(than.sent_at);
 
 function keepNewest(newest: Map<string, Message>, message: Message) {
   if (isLater(message, newest.get(message.conversation))) newest.set(message.conversation, message);
@@ -44,7 +40,7 @@ function keepNewest(newest: Map<string, Message>, message: Message) {
 
 type StoredLine = {
   id: string;
-  sent: string;
+  sent_at: string;
   text: string | null;
   from_me: boolean | null;
   attachments?: JsonValue;
@@ -56,7 +52,7 @@ const storedLine = (conversation: string, line: StoredLine): Message => ({
   from: null,
   from_me: line.from_me ?? false,
   text: line.text,
-  sent: line.sent,
+  sent_at: line.sent_at,
   attachments: keptAttachments(line.attachments),
   reactions: [],
 });
@@ -72,7 +68,7 @@ async function newestStored(context: JobContext, account: string | undefined) {
         newest,
         storedLine(source_id, {
           id: `${source_id}/last`,
-          sent: last_at,
+          sent_at: last_at,
           text: last_text ?? null,
           from_me: last_from_me ?? null,
         }),
@@ -80,15 +76,15 @@ async function newestStored(context: JobContext, account: string | undefined) {
     }
     const [row] = await context.collection("messages/messages").query({
       where: { conversation: id, source_id: { ne: null } },
-      orderBy: [{ field: "sent", direction: "desc" }],
+      orderBy: [{ field: "sent_at", direction: "desc" }],
       limit: 1,
     });
-    if (row?.source_id && row.sent) {
+    if (row?.source_id && row.sent_at) {
       keepNewest(
         newest,
         storedLine(source_id, {
           id: row.source_id,
-          sent: row.sent,
+          sent_at: row.sent_at,
           text: row.text ?? null,
           from_me: row.from_me ?? null,
           attachments: row.attachments,
@@ -103,9 +99,9 @@ type Changed = {
   id: string;
   conversation: string;
   from_me: boolean;
-  sent: string;
+  sent_at: string;
   reactions: Reaction[];
-  read: string | null;
+  read_at: string | null;
 };
 
 const peopleIn = (conversations: Conversation[], messages: Message[], reactions: ReactionChange[]) => [
@@ -147,7 +143,7 @@ async function changesFrom(
       id: row.source_id,
       conversation,
       from_me: row.from_me ?? false,
-      sent: row.sent ?? "",
+      sent_at: row.sent_at ?? "",
       reactions: keptReactions(
         listOf(row.reactions).map((entry) => {
           const { from, from_me, kind } = objectOf(entry);
@@ -159,7 +155,7 @@ async function changesFrom(
           };
         }),
       ),
-      read: row.read ?? null,
+      read_at: row.read_at ?? null,
     };
   };
   for (const reaction of reactions) {
@@ -179,11 +175,11 @@ async function changesFrom(
     const handles = listOf(chat?.participants).map((entry) => textOf(objectOf(entry).handle));
     if (!chat || chat.group || !handles.includes(reader.handle)) continue;
     const unread = await context.collection("messages/messages").query({
-      where: { conversation: chat.id, from_me: true, read: null, sent: { lte: at } },
+      where: { conversation: chat.id, from_me: true, read_at: null, sent_at: { lte: at } },
     });
     for (const row of unread) {
       const message = await kept(row.source_id ?? "", conversation);
-      if (message) changed.set(message.id, { ...message, read: at });
+      if (message) changed.set(message.id, { ...message, read_at: at });
     }
   }
   return [...changed.values()];
@@ -208,130 +204,110 @@ export async function syncAccount(context: JobContext, now = new Date()) {
   const [kept] = await context
     .collection("messages/accounts")
     .query({ where: { source, source_id: ACCOUNT.id } });
-  try {
-    const listed = conversationsIn(
-      objectOf(await context.connectors.call(CONNECTION, "conversations", { limit: chats }))
-        .conversations,
-    );
-    const newest = await newestStored(context, kept?.id);
-    const met: Person[] = [];
-    let synced: JsonValue = null;
-    for (let batch = 0; batch < MOST_BATCHES; batch += 1) {
-      const waiting = objectOf(
-        await context.connectors.call(CONNECTION, "take_events", { limit: BATCH }),
+  return context.sources.syncing("messages", ACCOUNT, () =>
+    inTheHelpersWords(context, async () => {
+      const listed = conversationsIn(
+        objectOf(await context.connectors.call(CONNECTION, "conversations", { limit: chats }))
+          .conversations,
       );
-      const messages = unique(messagesIn(waiting.messages)).filter(
-        ({ sent }) => Date.parse(sent) >= since.getTime(),
-      );
-      for (const message of messages) keepNewest(newest, message);
-      const taken = conversationsIn(waiting.conversations);
-      const conversations = unique([...listed, ...taken]).map((conversation) => {
-        const last = newest.get(conversation.id);
-        return last ? { ...conversation, last_message: last } : conversation;
-      });
-      const keep = (more: { messages: Message[]; changed: Changed[] }) =>
-        context.action("messages/sync", {
-          source,
-          account: ACCOUNT,
-          since: since.toISOString(),
-          conversations,
-          ...more,
+      const newest = await newestStored(context, kept?.id);
+      const met: Person[] = [];
+      let synced: JsonValue = null;
+      for (let batch = 0; batch < MOST_BATCHES; batch += 1) {
+        const waiting = objectOf(
+          await context.connectors.call(CONNECTION, "take_events", { limit: BATCH }),
+        );
+        const messages = unique(messagesIn(waiting.messages)).filter(
+          ({ sent_at }) => Date.parse(sent_at) >= since.getTime(),
+        );
+        for (const message of messages) keepNewest(newest, message);
+        const taken = conversationsIn(waiting.conversations);
+        const conversations = unique([...listed, ...taken]).map((conversation) => {
+          const last = newest.get(conversation.id);
+          return last ? { ...conversation, last_message: last } : conversation;
         });
-      synced = await keep({ messages, changed: [] });
-      const reactions = listOf(waiting.reactions).flatMap((entry) => keptReactionChange(entry) ?? []);
-      const reads = listOf(waiting.reads).flatMap((entry) => keptReadChange(entry) ?? []);
-      if (reactions.length > 0 || reads.length > 0) {
-        const [account] = await context
-          .collection("messages/accounts")
-          .query({ where: { source, source_id: ACCOUNT.id } });
-        const changed = await changesFrom(context, account?.id ?? "", reactions, reads);
-        if (changed.length > 0) synced = await keep({ messages: [], changed });
+        const keep = (more: { messages: Message[]; changed: Changed[] }) =>
+          context.action("messages/sync", {
+            source,
+            account: ACCOUNT,
+            since: since.toISOString(),
+            conversations,
+            ...more,
+          });
+        synced = await keep({ messages, changed: [] });
+        const reactions = listOf(waiting.reactions).flatMap((entry) => keptReactionChange(entry) ?? []);
+        const reads = listOf(waiting.reads).flatMap((entry) => keptReadChange(entry) ?? []);
+        if (reactions.length > 0 || reads.length > 0) {
+          const [account] = await context
+            .collection("messages/accounts")
+            .query({ where: { source, source_id: ACCOUNT.id } });
+          const changed = await changesFrom(context, account?.id ?? "", reactions, reads);
+          if (changed.length > 0) synced = await keep({ messages: [], changed });
+        }
+        met.push(...peopleIn(taken, messages, reactions));
+        await context.connectors.call(CONNECTION, "drop_events", {
+          upTo: numberOf(waiting.upTo) ?? 0,
+        });
+        if (waiting.more !== true) break;
       }
-      met.push(...peopleIn(taken, messages, reactions));
-      await context.connectors.call(CONNECTION, "drop_events", {
-        upTo: numberOf(waiting.upTo) ?? 0,
-      });
-      if (waiting.more !== true) break;
-    }
-    await addHandles(context, distinct(met));
-    return synced;
+      await addHandles(context, distinct(met));
+      return synced;
+    }),
+  );
+}
+
+async function inTheHelpersWords<Result>(context: JobContext, work: () => Promise<Result>) {
+  try {
+    return await work();
   } catch (error) {
-    const reason = context.connectors.failedBecause(error);
-    if (reason === null || !SKIPPED_OUTAGES.includes(reason)) {
-      const state = objectOf(
-        await context.connectors.call(CONNECTION, "state", {}).catch(() => null),
-      );
-      const problem = textOf(state.message) ?? reasonOf(error);
-      await context.action("messages/syncFailed", {
-        source,
-        account: ACCOUNT,
-        problem,
-        failed_because: reason,
+    const state = objectOf(
+      await context.connectors.call(CONNECTION, "state", {}).catch(() => null),
+    );
+    const words = textOf(state.message);
+    if (words === null) throw error;
+    throw Object.assign(new Error(words), { reason: context.connectors.failedBecause(error) });
+  }
+}
+
+export const sync = job(
+  {
+    timeout: "5m",
+    every: "5m",
+    catchUp: true,
+    when: [
+      { connector: CONNECTION, on: ["changed", "added", "removed"] },
+      { setting: "messages-whatsapp/kept_days" },
+      { setting: "messages-whatsapp/chats" },
+    ],
+  },
+  async (context: JobContext, event?: JobEvent) => {
+    const connectors = (await context.connectors.list()).filter(({ name }) => name === CONNECTION);
+    const synced = await context.sources.feed("messages", {
+      connectors,
+      event,
+      run: async () => {
+        await syncAccount(context);
+      },
+    });
+    return { synced };
+  },
+);
+
+export const send = job(
+  { timeout: "5m", every: "1m", catchUp: true, when: [{ collection: "messages/messages" }] },
+  async (context: JobContext) => {
+    const sent = await context.sources.drain("messages/messages", async (due) => {
+      if (!due.conversation) throw context.sources.refusal("cannot_do_here");
+      await context.connectors.call(CONNECTION, "send", {
+        conversation: due.conversation,
+        ...(due.text !== null && { text: due.text }),
+        ...(due.files.length > 0 && { files: due.files }),
       });
-    }
-    throw error;
-  }
-}
-
-export async function sync(context: JobContext) {
-  if (!(await isHere(context))) {
-    await context.action("messages/forget", { source: context.module, account: ACCOUNT.id });
-    return { synced: 0 };
-  }
-  await syncAccount(context);
-  return { synced: 1 };
-}
-
-type File = { name: string; base64: string };
-type Due = { id: string; conversation: string | null; text: string | null; files: File[] };
-
-const fileIn = (value: JsonValue): File[] => {
-  const name = textOf(objectOf(value).name);
-  const base64 = textOf(objectOf(value).base64);
-  return name === null || base64 === null ? [] : [{ name, base64 }];
-};
-
-function dueIn(answer: JsonValue): Due | null {
-  const due = objectOf(answer).send;
-  const id = textOf(objectOf(due).id);
-  if (id === null) return null;
-  const { conversation, text, files } = objectOf(due);
-  return {
-    id,
-    conversation: textOf(conversation),
-    text: textOf(text),
-    files: listOf(files).flatMap(fileIn),
-  };
-}
-
-export async function send(context: JobContext) {
-  const source = context.module;
-  let sent = 0;
-  for (;;) {
-    const due = dueIn(await context.action("messages/takeDue", { source }));
-    if (!due) return { sent };
-    sent += 1;
-    try {
-      if (due.conversation === null) {
-        throw new Error("WhatsApp can only answer in a chat that is already there.");
-      }
-      const { conversation } = due;
-      await context.onBehalfOf("messages/messages", due, () =>
-        context.connectors.call(CONNECTION, "send", {
-          conversation,
-          ...(due.text !== null && { text: due.text }),
-          ...(due.files.length > 0 && { files: due.files }),
-        }),
+      await syncAccount(context).catch((unsynced: Error) =>
+        console.warn(`Sent, but the chat did not sync after it: ${unsynced.message}`),
       );
-    } catch (error) {
-      await context.action("messages/sent", {
-        source,
-        id: due.id,
-        ...context.connectors.failure(error),
-      });
-      continue;
-    }
-    await syncAccount(context).catch(() => null);
-    await context.action("messages/sent", { source, id: due.id });
-  }
-}
+      return null;
+    });
+    return { sent };
+  },
+);

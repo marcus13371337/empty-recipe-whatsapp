@@ -4,7 +4,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import type { CodeConnection, HelperProgram, JsonObject, JsonValue } from "@empty/module-sdk";
 import { listOf, numberOf, objectOf, textOf } from "../json";
-import { type Conversation, HELPER, type Message, NO_REF, People, SERVICE } from "../whatsapp";
+import { type Conversation, HELPER, type Message, People, SERVICE } from "../whatsapp";
 
 const HELPER_PAGE = 100;
 
@@ -126,9 +126,6 @@ export function whatsappConnection(): CodeConnection {
   };
 
   const attachment = async (helper: HelperProgram, id: string) => {
-    if (id.startsWith(NO_REF)) {
-      throw new Error("WhatsApp has not handed this file over. Open the chat in WhatsApp.");
-    }
     const answer = objectOf(await helper.request("attachment", { ref: id }));
     const path = textOf(answer.path) ?? "";
     try {
@@ -137,12 +134,12 @@ export function whatsappConnection(): CodeConnection {
         attachment: {
           id,
           name: textOf(answer.name) ?? basename(path),
-          mediaType,
+          media_type: mediaType,
           size: numberOf(answer.size) ?? 0,
         },
         file: {
           base64: (await readFile(path)).toString("base64"),
-          mediaType: mediaType ?? "application/octet-stream",
+          media_type: mediaType ?? "application/octet-stream",
         },
         kept: "here",
       };

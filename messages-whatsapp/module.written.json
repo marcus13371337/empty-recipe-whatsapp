@@ -1,0 +1,100 @@
+{
+  "name": "WhatsApp",
+  "description": "Brings the person's WhatsApp chats into the messages module and sends through it.",
+  "settings": {
+    "kept_days": {
+      "type": "integer",
+      "default": 30,
+      "min": 1,
+      "max": 3650
+    },
+    "chats": {
+      "type": "integer",
+      "default": 100,
+      "min": 1,
+      "max": 2000
+    }
+  },
+  "sourceOf": "messages",
+  "connectors": [
+    "whatsapp"
+  ],
+  "helperPrograms": {
+    "whatsapp": {
+      "title": "WhatsApp helper",
+      "for": "Keeps your WhatsApp linked as a device, like WhatsApp on a computer, so your chats come into Messages and your replies go out.",
+      "version": "0.1.0",
+      "args": [],
+      "signIn": {
+        "pair": {
+          "qr": [
+            "Open WhatsApp on your phone",
+            "Tap Settings, then Linked devices",
+            "Tap Link a device and point the phone at this code"
+          ],
+          "code": [
+            "Open WhatsApp on your phone",
+            "Tap Settings, then Linked devices",
+            "Tap Link a device, then Link with phone number instead",
+            "Type this code on the phone"
+          ]
+        }
+      },
+      "platforms": {
+        "darwin-arm64": {
+          "url": "https://github.com/marcus13371337/whatsapp-helper/releases/download/v0.1.0/whatsapp-helper-darwin-arm64",
+          "sha256": "e4f23021a9bbe9f575eda015bb989c11771a7a91b28717ff97643cb197a9a753"
+        },
+        "darwin-x64": {
+          "url": "https://github.com/marcus13371337/whatsapp-helper/releases/download/v0.1.0/whatsapp-helper-darwin-x64",
+          "sha256": "2a2f16726ab243da0dfc9cac21ef133a382f3b2d1e4235ccd1513659d4703859"
+        }
+      }
+    }
+  },
+  "jobs": [
+    {
+      "job": "send",
+      "timeout": "5m"
+    },
+    {
+      "job": "sync",
+      "timeout": "5m"
+    }
+  ],
+  "schedules": [
+    {
+      "job": "send",
+      "every": "1m",
+      "catchUp": true
+    },
+    {
+      "job": "sync",
+      "every": "5m",
+      "catchUp": true
+    }
+  ],
+  "triggers": [
+    {
+      "job": "send",
+      "collection": "messages/messages"
+    },
+    {
+      "job": "sync",
+      "connector": "whatsapp",
+      "on": [
+        "changed",
+        "added",
+        "removed"
+      ]
+    },
+    {
+      "job": "sync",
+      "setting": "messages-whatsapp/kept_days"
+    },
+    {
+      "job": "sync",
+      "setting": "messages-whatsapp/chats"
+    }
+  ]
+}
