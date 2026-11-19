@@ -1,5 +1,5 @@
-import type { JsonValue } from "@empty/module-sdk";
-import { isObject, listOf, numberOf, objectOf, textOf } from "./json";
+import { isJsonObject, type JsonValue } from "@empty/module-sdk";
+import { listOf, numberOf, objectOf, textOf } from "./json";
 
 export const CONNECTION = "whatsapp";
 export const HELPER = "whatsapp";
@@ -41,7 +41,7 @@ export const UNSUPPORTED = "This message can only be seen in WhatsApp.";
 export const NO_REF = "no-ref:";
 
 function attachmentOf(raw: JsonValue, message: string): Attachment | null {
-  if (!isObject(raw)) return null;
+  if (!isJsonObject(raw)) return null;
   const id = textOf(raw.id) ?? "";
   const size = numberOf(raw.size);
   return {
@@ -95,7 +95,7 @@ export class People {
   }
 
   conversationOf(raw: JsonValue): Conversation | null {
-    if (!isObject(raw)) return null;
+    if (!isJsonObject(raw)) return null;
     const id = textOf(raw.id);
     if (id === null) return null;
     const people = listOf(raw.participants);
@@ -113,7 +113,7 @@ export class People {
   }
 
   messageOf(raw: JsonValue): Message | null {
-    if (!isObject(raw)) return null;
+    if (!isJsonObject(raw)) return null;
     const id = textOf(raw.id);
     const conversation = textOf(raw.conversation_id);
     const sentAt = textOf(raw.sent_at);

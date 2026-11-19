@@ -1,10 +1,7 @@
-import type { JsonObject, JsonValue } from "@empty/module-sdk";
-
-export const isObject = (value: JsonValue | undefined): value is JsonObject =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
+import { isJsonObject, type JsonObject, type JsonValue } from "@empty/module-sdk";
 
 export const objectOf = (value: JsonValue | undefined): JsonObject =>
-  isObject(value) ? value : {};
+  isJsonObject(value) ? value : {};
 
 export const listOf = (value: JsonValue | undefined): JsonValue[] =>
   Array.isArray(value) ? value : [];
