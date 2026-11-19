@@ -212,7 +212,6 @@ export async function syncAccount(context: JobContext, now = new Date()) {
       );
       const newest = await newestStored(context, kept?.id);
       const met: Person[] = [];
-      let synced: JsonValue = null;
       for (let batch = 0; batch < MOST_BATCHES; batch += 1) {
         const waiting = objectOf(
           await context.connectors.call(CONNECTION, "take_events", { limit: BATCH }),
@@ -234,7 +233,7 @@ export async function syncAccount(context: JobContext, now = new Date()) {
             conversations,
             ...more,
           });
-        synced = await keep({ messages, changed: [] });
+        await keep({ messages, changed: [] });
         const reactions = listOf(waiting.reactions).flatMap((entry) => keptReactionChange(entry) ?? []);
         const reads = listOf(waiting.reads).flatMap((entry) => keptReadChange(entry) ?? []);
         if (reactions.length > 0 || reads.length > 0) {
@@ -242,7 +241,7 @@ export async function syncAccount(context: JobContext, now = new Date()) {
             .collection("messages/accounts")
             .query({ where: { source, source_id: ACCOUNT.id } });
           const changed = await changesFrom(context, account?.id ?? "", reactions, reads);
-          if (changed.length > 0) synced = await keep({ messages: [], changed });
+          if (changed.length > 0) await keep({ messages: [], changed });
         }
         met.push(...peopleIn(taken, messages, reactions));
         await context.connectors.call(CONNECTION, "drop_events", {
@@ -251,7 +250,6 @@ export async function syncAccount(context: JobContext, now = new Date()) {
         if (waiting.more !== true) break;
       }
       await addHandles(context, distinct(met));
-      return synced;
     }),
   );
 }
