@@ -81,12 +81,7 @@
     },
     {
       "job": "sync",
-      "connector": "whatsapp",
-      "on": [
-        "changed",
-        "added",
-        "removed"
-      ]
+      "connector": "whatsapp"
     },
     {
       "job": "sync",

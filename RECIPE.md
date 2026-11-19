@@ -16,7 +16,7 @@ Tell the person, in your own words, and go on only on their yes:
 
 ## Needs
 
-- Empty 0.9.14 or newer: modules stated in code, in `module.ts`. `empty check` refuses the module on an older app.
+- Empty 0.9.16 or newer. `empty check` refuses the module on an older app.
 - A Mac with Apple silicon or Intel.
 - A phone with WhatsApp on the number to link.
 

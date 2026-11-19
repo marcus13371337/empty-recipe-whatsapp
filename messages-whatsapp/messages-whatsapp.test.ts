@@ -140,13 +140,14 @@ test("a sync with no events moves a stale latest up to the newest message kept",
   expect((await chat("g1")).conversation).toMatchObject({ last_text: "Newer", last_at: newer.sent_at });
 });
 
-test("a reply still waiting to go out leaves a stale latest corrected by the newest message kept", async () => {
+test("a reply that never went out leaves a stale latest corrected by the newest message kept", async () => {
   const { engine, fake, chat } = await setUp();
   fake.chat("g1", [ANNA, BO], { group: true, name: "Family" });
   const newer = fake.history("g1", BO, "Newer", 10);
   await engine.job("messages-whatsapp/sync");
   const { conversation } = await chat("g1");
-  await engine.run("messages/send", { conversation: conversation?.id ?? "", text: "Waiting" });
+  engine.refuse("whatsapp", "send", failureFrom("You said no.", "refused_by_person"));
+  await engine.run("messages/send", { conversation: conversation?.id ?? "", text: "Unsent" });
   await engine.collection("messages/conversations").update(conversation?.id ?? "", {
     last_text: "Stale",
     last_at: new Date(Date.now() - 15 * 86_400_000).toISOString(),
@@ -303,7 +304,6 @@ test("a reply with a picture goes out through the helper, which gets the file in
     text: "Here",
     files: [{ name: "beach.png", base64: Buffer.from("a picture").toString("base64") }],
   });
-  await engine.job("messages-whatsapp/send");
 
   const sent = fake.asked.find(({ method }) => method === "send");
   expect(sent?.params).toMatchObject({ conversation_id: "c1", text: "Here" });
@@ -323,7 +323,6 @@ test("a reply is kept from the helper's answer, before its echo arrives", async 
   const { conversation } = await chat("c1");
 
   await engine.run("messages/send", { conversation: conversation?.id ?? "", text: "Hello" });
-  await engine.job("messages-whatsapp/send");
 
   expect((await chat("c1")).messages.map(({ text, pending }) => ({ text, pending }))).toEqual([
     { text: "Hi", pending: null },
@@ -339,7 +338,6 @@ test("a reply the person said no to is kept as refused by them", async () => {
   engine.refuse("whatsapp", "send", failureFrom("You said no.", "refused_by_person"));
 
   await engine.run("messages/send", { conversation: conversation?.id ?? "", text: "Here" });
-  await engine.job("messages-whatsapp/send");
 
   const reply = (await chat("c1")).messages.find(({ text }) => text === "Here");
   expect(reply?.failed_because).toBe("refused_by_person");
@@ -353,7 +351,6 @@ test("a reply whose send timed out is kept as maybe sent, and not sent again", a
   engine.refuse("whatsapp", "send", failureFrom("Too slow.", "timeout"));
 
   await engine.run("messages/send", { conversation: conversation?.id ?? "", text: "Here" });
-  await engine.job("messages-whatsapp/send");
   await engine.job("messages-whatsapp/send");
 
   const reply = (await chat("c1")).messages.find(({ text }) => text === "Here");
