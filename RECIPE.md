@@ -50,7 +50,7 @@ Tell the person, in your own words, and go on only on their yes:
 - The history their phone sends when linked, up to `kept_days`, and every message after, in Messages, next to their other chats.
 - Replies, with pictures and files, from the chat. The app asks before anything is sent, as it does for every send.
 - Reactions and, in one-to-one chats, when their message was read.
-- People by their phone number where WhatsApp shares it, so Contacts can name and picture them. Someone met only in a group may come with a WhatsApp id instead, until WhatsApp shares the number. Each comes into People unlinked, for the person to link once.
+- People by their phone number where WhatsApp shares it, else by their WhatsApp id, as someone met only in a group may be. With `messages-people` on, chats are named from People: a number once someone in People has it, and a WhatsApp id once the person links it, since ids come into People unlinked.
 
 Not there: starting a new chat, edits, deleted messages, polls, view-once, calls, status updates, earlier messages than the ones kept, and search beyond what the app keeps.
 
@@ -102,5 +102,5 @@ The tests run against a fake helper. Before you publish a new commit or move the
 - remove the device on the phone, see the account say why and the app ask to link again, then link by code
 - send a text and a picture, and receive one sent from the phone
 - react from the phone, and see it in the chat; read a message on the phone, and see it marked read in the chat
-- see one-to-one people as phone numbers in People, linked to the right someone once linked
+- with `messages-people` on, see one-to-one people named from People by their phone number
 - open a one-to-one chat in WhatsApp from Messages
