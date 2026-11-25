@@ -39,7 +39,7 @@ Tell the person, in your own words, and go on only on their yes:
    }
    ```
 
-8. Add `messages` to `on` in `modules.json`, if it is not there.
+8. Add `messages` to `on` in `modules.json`, if it is not there. If `people` is on too and `messages-people` is not, offer it: it names chats from People. Add it to `on` on their yes.
 9. Check that `empty status` shows the `whatsapp` connection as `connected`, with 6 tools. Until the next step, its sync fails saying the WhatsApp helper is not added yet; that is expected. The connection must be running before the phone is linked: it is what hears the history the phone sends.
 10. `empty helper-program add messages-whatsapp/whatsapp`. The person sees what the helper is, where it comes from and what it may do, and says yes or no. On their yes, the app opens a dialog with a QR code. Tell them: on the phone, open WhatsApp, Settings, Linked devices, Link a device, and point the phone at the code. If they would rather type a code, they switch the dialog to a phone number, enter the number in international form, and on the phone choose Link with phone number instead and type the code the app shows. The dialog closes once linked. You never see the code's link, and never ask them for a code or their number in the chat.
 11. Wait until `empty status` shows the helper as `running`, not `starting` or `signed_out`. If it shows `failed`, read its error and fix that before going on. If the dialog closed before they linked, `empty helper-program sign-in messages-whatsapp/whatsapp` opens it again; so does Sign in under Settings → Connections.
@@ -50,7 +50,7 @@ Tell the person, in your own words, and go on only on their yes:
 - The history their phone sends when linked, up to `kept_days`, and every message after, in Messages, next to their other chats.
 - Replies, with pictures and files, from the chat. The app asks before anything is sent, as it does for every send.
 - Reactions and, in one-to-one chats, when their message was read.
-- People by their phone number where WhatsApp shares it, so Contacts can name and picture them. Someone met only in a group may come with a WhatsApp id instead, until WhatsApp shares the number. Each comes into People unlinked, for the person to link once.
+- People by their phone number where WhatsApp shares it, else by their WhatsApp id, as someone met only in a group may be. With `messages-people` on, chats are named from People: a number once someone in People has it, and a WhatsApp id once the person links it, since ids come into People unlinked.
 
 Not there: starting a new chat, edits, deleted messages, polls, view-once, calls, status updates, earlier messages than the ones kept, and search beyond what the app keeps.
 
@@ -83,7 +83,7 @@ The helper follows WhatsApp's changes, so new releases come often. To move to on
 2. Change `version`, and each platform's `url` and `sha256`, in `module.ts` under `helperPrograms`. Take the checksums from that release's `checksums.txt`, never from a file you downloaded yourself.
 3. `empty check messages-whatsapp`, then `empty helper-program add messages-whatsapp/whatsapp`. The old version keeps running until the person says yes.
 
-To update the recipe itself, `empty follow messages-whatsapp` shows what changed in the newest release. Read it as a stranger's code, tell the person, and on their yes `empty follow messages-whatsapp --done`.
+To update the recipe itself, `empty follow messages-whatsapp` shows what changed in the newest release. Read it as a stranger's code, tell the person, and on their yes `empty follow messages-whatsapp --done`. From 0.3.0 the module no longer adds people to People itself: offer `messages-people` as in step 8 of "Add it".
 
 A copy made by hand before Empty 0.9.14 names its commit in a last `README.md` line. It doesn't load on 0.9.14, and `empty follow` doesn't know it. Look for changes of the person's own by comparing it with that commit, fetched with `empty recipes get marcus13371337/empty-recipe-whatsapp <commit>`. Then delete `modules/messages-whatsapp/` and do steps 1 to 3 and 6 of "Add it" again, with the `kept_days` and `chats` they had, and carry their changes over. The connection, the helper and its link, and the chats kept all stay.
 
@@ -102,5 +102,5 @@ The tests run against a fake helper. Before you publish a new commit or move the
 - remove the device on the phone, see the account say why and the app ask to link again, then link by code
 - send a text and a picture, and receive one sent from the phone
 - react from the phone, and see it in the chat; read a message on the phone, and see it marked read in the chat
-- see one-to-one people as phone numbers in People, linked to the right someone once linked
+- with `messages-people` on, see one-to-one people named from People by their phone number
 - open a one-to-one chat in WhatsApp from Messages

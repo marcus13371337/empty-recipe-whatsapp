@@ -270,7 +270,7 @@ test("a message WhatsApp can't carry says to open it in WhatsApp", async () => {
   expect((await chat("c1")).messages.map(({ text }) => text)).toEqual([UNSUPPORTED]);
 });
 
-test("people carry their phone number where WhatsApp gives one, else their WhatsApp id, and come into people unlinked", async () => {
+test("people carry their phone number where WhatsApp gives one, else their WhatsApp id", async () => {
   const { engine, fake, chat } = await setUp();
   fake.chat("g1", [ANNA, BO], { group: true, name: "Family" });
   fake.history("g1", BO, "Hi all", 5);
@@ -283,13 +283,6 @@ test("people carry their phone number where WhatsApp gives one, else their Whats
     { handle: BO.id, kind: "id", source_name: "Bo" },
   ]);
   expect(family.messages[0]).toMatchObject({ from_handle: BO.id, from_kind: "id" });
-  const handles = await engine.collection("people/handles").query({});
-  expect(handles).toEqual(
-    expect.arrayContaining([
-      expect.objectContaining({ kind: "phone", service: null, value: ANNA.phone, someone: null }),
-      expect.objectContaining({ kind: "id", service: "WhatsApp", value: BO.id, someone: null }),
-    ]),
-  );
 });
 
 test("a reply with a picture goes out through the helper, which gets the file in its folder", async () => {
@@ -515,8 +508,6 @@ test("the person's own reaction is theirs before any message of theirs was seen"
   await engine.job("messages-whatsapp/sync");
 
   expect((await chat("c1")).messages[0]?.reactions).toMatchObject([{ from: null, from_me: true, kind: "🎉" }]);
-  const handles = await engine.collection("people/handles").query({});
-  expect(handles.map(({ value }) => value)).not.toContain(ME.phone);
 });
 
 test("in a group, a reaction from someone who has left stays theirs, not the person's", async () => {
