@@ -3,7 +3,6 @@ import { listOf, numberOf, objectOf, textOf } from "./json";
 import {
   ACCOUNT,
   CONNECTION,
-  type Conversation,
   keptAttachments,
   keptConversation,
   keptMessage,
@@ -15,7 +14,6 @@ import {
   type Reaction,
   type ReactionChange,
   type ReadChange,
-  SERVICE,
 } from "./whatsapp";
 
 export const BATCH = 500;
@@ -104,24 +102,6 @@ type Changed = {
   read_at: string | null;
 };
 
-const peopleIn = (conversations: Conversation[], messages: Message[], reactions: ReactionChange[]) => [
-  ...conversations.flatMap(({ participants }) => participants ?? []),
-  ...messages.flatMap(({ from, reactions }) => [
-    ...(from ? [from] : []),
-    ...reactions.flatMap((reaction) => reaction.from ?? []),
-  ]),
-  ...reactions.flatMap(({ from }) => from ?? []),
-];
-
-function distinct(people: Person[]): Person[] {
-  const byHandle = new Map<string, Person>();
-  for (const person of people) {
-    const kept = byHandle.get(person.handle);
-    if (!kept?.name) byHandle.set(person.handle, person);
-  }
-  return [...byHandle.values()];
-}
-
 const sameSender = (a: Reaction, b: { from: Person | null; from_me: boolean }) =>
   a.from_me === b.from_me && (a.from_me || a.from?.handle === b.from?.handle);
 
@@ -185,17 +165,6 @@ async function changesFrom(
   return [...changed.values()];
 }
 
-async function addHandles(context: JobContext, people: Person[]) {
-  for (const { handle, kind, name } of people) {
-    await context.action("people/addHandle", {
-      kind,
-      value: handle,
-      name,
-      ...(kind === "id" && { service: SERVICE }),
-    });
-  }
-}
-
 export async function syncAccount(context: JobContext, now = new Date()) {
   const source = context.module;
   const keptDays = await context.setting("messages-whatsapp/kept_days");
@@ -211,7 +180,6 @@ export async function syncAccount(context: JobContext, now = new Date()) {
           .conversations,
       );
       const newest = await newestStored(context, kept?.id);
-      const met: Person[] = [];
       for (let batch = 0; batch < MOST_BATCHES; batch += 1) {
         const waiting = objectOf(
           await context.connectors.call(CONNECTION, "take_events", { limit: BATCH }),
@@ -243,13 +211,11 @@ export async function syncAccount(context: JobContext, now = new Date()) {
           const changed = await changesFrom(context, account?.id ?? "", reactions, reads);
           if (changed.length > 0) await keep({ messages: [], changed });
         }
-        met.push(...peopleIn(taken, messages, reactions));
         await context.connectors.call(CONNECTION, "drop_events", {
           upTo: numberOf(waiting.upTo) ?? 0,
         });
         if (waiting.more !== true) break;
       }
-      await addHandles(context, distinct(met));
     }),
   );
 }
